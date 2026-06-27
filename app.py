@@ -15,7 +15,7 @@ sys.path.insert(0, BASE_DIR)
 
 from config import *
 from weibo import fetch_desc1
-from notifier import notify, send as tg_send
+from notifier import notify, send as tg_send, enabled as tg_enabled
 
 # ===== 工具函数 =====
 def beijing_now():
@@ -255,7 +255,7 @@ def monitor_loop():
         last_status = log_arr[-1]["status"]
     print(f"[启动] 岁己SUI 微博在线状态监控")
     print(f"[配置] 轮询间隔: {POLL_INTERVAL}秒")
-    print(f"[通知] Telegram: {'已配置' if notifier.enabled() else '未配置'}")
+    print(f"[通知] Telegram: {'已配置' if tg_enabled() else '未配置'}")
     print(f"[日志] {LOG_PATH}")
     print()
     notify(f"岁己SUI 微博监控已启动\n当前状态: {'在线' if last_status == 'online' else '离线'}")
