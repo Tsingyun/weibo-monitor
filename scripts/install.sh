@@ -47,6 +47,9 @@ fi
 
 # ---- 4. 数据目录 ----
 mkdir -p logs data
+# 初始化数据文件
+[ ! -f data/events.json ] && echo '[]' > data/events.json
+[ ! -f data/history.json ] && echo '[]' > data/history.json
 ok "数据目录就绪"
 
 # ---- 5. systemd 服务（仅在 Linux 下） ----

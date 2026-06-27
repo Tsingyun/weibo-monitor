@@ -6,6 +6,8 @@ from config import LOG_PATH, LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT
 
 def setup_logger(name="weibo-monitor"):
     logger = logging.getLogger(name)
+    if logger.handlers:
+        return logger
     logger.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 
     # 终端 Handler

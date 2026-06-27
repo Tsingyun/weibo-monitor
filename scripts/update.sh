@@ -9,7 +9,12 @@ echo "=== 更新代码 ==="
 git pull origin main
 
 echo "=== 安装新依赖 ==="
-source venv/bin/activate
+if [ -f venv/bin/activate ]; then
+    source venv/bin/activate
+else
+    echo "ERROR: venv not found. Run install.sh first."
+    exit 1
+fi
 pip install -r requirements.txt -q
 
 echo "=== 重启服务 ==="

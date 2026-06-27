@@ -13,8 +13,10 @@ BACKUP_FILE="${BACKUP_DIR}/weibo-monitor_${TIMESTAMP}.tar.gz"
 # 备份数据文件和配置
 tar -czf "$BACKUP_FILE" \
     -C "$PROJECT_DIR" \
-    data/ \
-    logs/weibolog.json \
+    data/events.json \
+    data/stats.json \
+    data/history.json \
+    logs/ \
     .env 2>/dev/null || true
 
 echo "备份完成: $BACKUP_FILE"

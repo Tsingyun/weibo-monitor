@@ -3,6 +3,7 @@
 
 # 日志和运行时数据
 logs/
+data/events.json
 data/stats.json
 backups/
 

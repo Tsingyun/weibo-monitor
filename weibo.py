@@ -4,6 +4,7 @@ import time
 import ssl
 import json
 import urllib.request
+import urllib.error
 from config import WEIBO_COOKIE, WEIBO_CONTAINERID, REQUEST_TIMEOUT, RETRY_COUNT
 
 API_URL = f"https://m.weibo.cn/api/container/getIndex?containerid={WEIBO_CONTAINERID}_-_live"
@@ -21,7 +22,7 @@ def _build_request():
 def fetch_desc1(log_fn=None):
     """请求超话 API 获取 desc1 字段（带指数退避重试）"""
     last_err = None
-    for attempt in range(RETRY_COUNT):
+    for attempt in range(max(1, RETRY_COUNT)):
         try:
             ctx = ssl.create_default_context()
             req = _build_request()
@@ -39,5 +40,7 @@ def fetch_desc1(log_fn=None):
             if log_fn:
                 log_fn(f"微博请求失败 (attempt {attempt+1}/{RETRY_COUNT}): {e}")
             if attempt < RETRY_COUNT - 1:
-                time.sleep(min(2 ** attempt, 30))  # 1s, 2s, 4s... max 30s
-    raise last_err if last_err else RuntimeError("微博请求失败")
+                time.sleep(min(2 ** attempt, 30))
+    if last_err:
+        raise last_err
+    return None

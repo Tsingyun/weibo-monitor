@@ -3,8 +3,12 @@
 import time
 from datetime import datetime, timedelta
 from collections import defaultdict
-from utils import *
-from config import *
+from config import (
+    EVENT_PATH, STATS_PATH, HISTORY_PATH,
+    POLL_INTERVAL, REQUEST_TIMEOUT, RETRY_COUNT,
+    DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
+)
+from utils import beijing_now, beijing_str, logical_date, is_online, read_json, write_json, format_duration
 
 class Monitor:
     """微博超话在线状态监控器"""
@@ -15,6 +19,7 @@ class Monitor:
         self.last_desc1 = None
         self.consecutive_errors = 0
         self.error_alert_sent = False
+        self.error_start_time = None
         self.last_heartbeat = None
         self.start_time = beijing_now()
         self.total_checks = 0
@@ -22,10 +27,10 @@ class Monitor:
 
     # ---- 日志读写 ----
     def read_log(self):
-        return read_json(LOG_PATH, [])
+        return read_json(EVENT_PATH, [])
 
     def write_log(self, arr):
-        write_json(LOG_PATH, arr)
+        write_json(EVENT_PATH, arr)
 
     # ---- 统计 ----
     def compute_stats(self):

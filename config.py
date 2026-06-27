@@ -5,10 +5,13 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+# ===== 基础路径 =====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ===== 必填配置（无默认值，启动即校验）=====
 WEIBO_COOKIE = os.getenv("WEIBO_COOKIE")
 if not WEIBO_COOKIE:
-    raise RuntimeError("❌ 缺少 WEIBO_COOKIE，请在 .env 中设置")
+    raise RuntimeError("缺少 WEIBO_COOKIE，请在 .env 中设置")
 
 WEIBO_CONTAINERID = os.getenv("WEIBO_CONTAINERID", "100808f7e22e5e7435023544d44d473e414c10")
 
@@ -27,14 +30,13 @@ DAY_BOUNDARY_HOUR = int(os.getenv("DAY_BOUNDARY_HOUR", "4"))
 HEARTBEAT_HOUR = int(os.getenv("HEARTBEAT_HOUR", "8"))
 HEARTBEAT_ENABLED = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
 
-# 路径
-import os as _os
-BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
-LOG_PATH = _os.path.join(BASE_DIR, "logs", "monitor.log")
+# 日志路径
+LOG_PATH = os.path.join(BASE_DIR, "logs", "monitor.log")       # 文本日志（RotatingFileHandler）
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "10"))
 
-DB_PATH = _os.path.join(BASE_DIR, "data", "state.json")
-STATS_PATH = _os.path.join(BASE_DIR, "data", "stats.json")
-HISTORY_PATH = _os.path.join(BASE_DIR, "data", "history.json")
+# 数据路径
+EVENT_PATH = os.path.join(BASE_DIR, "data", "events.json")     # JSON 事件日志（监控数据）
+STATS_PATH = os.path.join(BASE_DIR, "data", "stats.json")      # 统计缓存
+HISTORY_PATH = os.path.join(BASE_DIR, "data", "history.json")  # 历史每日数据
