@@ -1,60 +1,81 @@
 # 岁己SUI 微博监控
 
-监控 B站虚拟主播「岁己SUI」的微博超话在线状态，支持 Telegram 实时通知。
+本地运行的微博超话在线状态监控工具，支持 Telegram Bot 通知和交互式命令。
 
 ## 功能
 
-- **实时监控** — 轮询微博超话 API（默认 15 秒），检测上下线
-- **Telegram 推送** — 上线/下线即时通知，含在线时长
-- **指数退避重试** — 网络异常自动恢复，不丢数据
-- **每日心跳** — 每天 8:00 发送运行摘要
-- **日志系统** — RotatingFileHandler，10MB×10 份自动轮转
-- **状态持久化** — 数据保存至 JSON，重启不重复通知
-- **资源友好** — 专为 e2-micro 优化，MemoryMax=128M
+- **实时监控** — 轮询超话 API（默认 30 秒），检测上下线
+- **Telegram 通知** — 上/下线即时推送，含在线时长
+- **Bot 交互命令** — `/status` `/today` `/stats` `/log` `/daily` `/hourly`
+- **图表生成** — Bot 直接回复 PNG 统计图表（每日柱状图 + 24H 分布）
+- **WebUI 面板**（可选）— 浏览器本地数据面板
+- **去重保护** — 状态不变不重复通知
 
 ## 快速开始
 
 ```bash
-# 安装
-cp .env.example .env   # 编辑 .env 填入 WEIBO_COOKIE
-bash scripts/install.sh
+# 1. 安装依赖
+pip install -r requirements.txt
 
-# 启动
-python app.py           # 前台运行
+# 2. 配置 .env
+copy .env.example .env
+# 编辑 .env 填入 WEIBO_COOKIE
+
+# 3. 启动（二选一）
+双击 start.bat
 # 或
-sudo systemctl start weibo-monitor  # systemd 后台运行
+python app.py
 ```
+
+## Bot 命令
+
+在 Telegram 给 `@sui_weibo_bot` 发送：
+
+| 命令 | 功能 |
+|------|------|
+| `/status` | 当前状态 + 运行时长 |
+| `/today` | 今日上线次数 + 在线时长 |
+| `/stats` | 累计统计摘要 |
+| `/log` | 最近 10 条日志 |
+| `/daily` | 📊 每日上线图表 |
+| `/hourly` | 📊 24H 时段分布 |
+| `/help` | 帮助 |
+
+## WebUI（可选）
+
+```bash
+pip install flask
+python web_ui.py
+# 浏览器打开 http://localhost:8765
+```
+
+## 配置
+
+所有配置通过 `.env`，见 `.env.example`。
+
+## 获取 Cookie
+
+1. Chrome 打开 https://m.weibo.cn 登录
+2. F12 → Application → Cookies → m.weibo.cn
+3. 复制 `SUB`、`SUBP`、`SCF`、`XSRF-TOKEN`
+4. 填入 `.env` 的 `WEIBO_COOKIE`
 
 ## 项目结构
 
 ```
 weibo-monitor/
-├── app.py              主入口
-├── monitor.py          监控核心逻辑
-├── weibo.py            微博 API（带重试）
-├── notifier.py         Telegram 通知（带重试）
-├── utils.py            工具函数
-├── config.py           配置（环境变量）
-├── logger.py           日志系统
+├── app.py          主入口（监控）
+├── monitor.py      监控核心
+├── weibo.py        微博 API（指数退避重试）
+├── notifier.py     Telegram 通知
+├── tg_commands.py  Bot 交互命令
+├── charts.py       图表生成（matplotlib）
+├── config.py       环境变量配置
+├── utils.py        工具函数
+├── logger.py       日志系统
+├── web_ui.py       WebUI 面板（可选）
+├── start.bat       Windows 一键启动
 ├── requirements.txt
-├── .env.example        配置模板
-├── .gitignore
-├── scripts/
-│   ├── install.sh      一键部署
-│   ├── update.sh       一键更新
-│   ├── backup.sh       数据备份
-│   └── weibo-monitor.service  systemd 服务文件
-└── data/
-    └── history.json     历史每日上线数据
+├── .env.example    配置模板
+└── data/           历史数据和运行时统计
 ```
-
-## 配置
-
-所有配置通过 `.env` 环境变量，详见 `.env.example`。
-
-## 获取 Cookie
-
-1. 打开 Chrome 访问 https://m.weibo.cn 并登录
-2. F12 → Application → Cookies → m.weibo.cn
-3. 复制 `SUB`、`SUBP`、`SCF`、`XSRF-TOKEN` 的值
-4. 拼成 `SUB=...; SUBP=...; SCF=...; XSRF-TOKEN=...` 填入 .env

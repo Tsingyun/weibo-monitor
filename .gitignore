@@ -21,6 +21,3 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
-
-# Windows 批处理（服务器不需要）
-*.bat
