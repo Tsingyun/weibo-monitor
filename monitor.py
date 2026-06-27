@@ -153,43 +153,36 @@ class Monitor:
             self.total_checks += 1
             now = beijing_now()
             now_status = "online" if is_online(desc1) else "offline"
-            desc_time = parse_desc1_time(desc1, now)
 
+            # 仅在状态真正变化时通知
+            if now_status == self.last_status:
+                return  # 状态未变，跳过
+
+            log_item = {"time": beijing_str(now), "status": now_status, "desc1": desc1}
             logs = self.read_log()
-            last_log = logs[-1] if logs else None
-            should_record = True
+            logs.append(log_item)
+            self.write_log(logs)
+            self.save_stats()
 
-            if desc_time and last_log:
-                try:
-                    lt = datetime.strptime(last_log["time"], "%Y-%m-%d %H:%M:%S")
-                    if abs((desc_time - lt).total_seconds()) <= 120:
-                        should_record = False
-                except Exception:
-                    pass
-            if last_log and now_status == last_log["status"]:
-                should_record = False
+            # 找到最近一次上线的时间，计算在线时长
+            online_at = None
+            for entry in reversed(logs[:-1]):  # 排除刚写入的
+                if entry["status"] == "online":
+                    online_at = datetime.strptime(entry["time"], "%Y-%m-%d %H:%M:%S")
+                    break
 
-            if should_record:
-                log_item = {"time": beijing_str(now), "status": now_status, "desc1": desc1}
-                logs.append(log_item)
-                self.write_log(logs)
-                self.save_stats()
+            self.total_notifications += 1
+            label = "🟢 上线" if now_status == "online" else "🔴 下线"
+            msg = f"岁己SUI {label}\n{log_item['time']}\n{desc1}"
+            if now_status == "offline" and online_at:
+                dur = (now - online_at).total_seconds()
+                msg += f"\n持续在线: {format_duration(dur)}"
 
-                self.total_notifications += 1
-                label = "🟢 上线" if now_status == "online" else "🔴 下线"
-                msg = f"岁己SUI {label}\n{log_item['time']}\n{desc1}"
-                if now_status == "offline" and last_log and last_log["status"] == "online":
-                    try:
-                        t0 = datetime.strptime(last_log["time"], "%Y-%m-%d %H:%M:%S")
-                        dur = (now - t0).total_seconds()
-                        msg += f"\n持续在线: {format_duration(dur)}"
-                    except Exception:
-                        pass
-                self.log(msg)
-                tg_notify(msg, log_fn=self.log)
+            self.log(msg)
+            tg_notify(msg, log_fn=self.log)
 
-                self.last_status = now_status
-                self.last_desc1 = desc1
+            self.last_status = now_status
+            self.last_desc1 = desc1
 
         except Exception as e:
             self.consecutive_errors += 1
