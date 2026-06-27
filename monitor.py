@@ -238,14 +238,21 @@ class Monitor:
         self.log(f"[启动] 岁己SUI 微博监控")
         self.log(f"[配置] 轮询: {POLL_INTERVAL}s 超时: {REQUEST_TIMEOUT}s 重试: {RETRY_COUNT}次")
         self.log(f"[状态] {'在线' if self.last_status == 'online' else '离线'}")
+
+        # 初始化 Telegram 命令模块
+        import tg_commands
+        import os
+        tg_commands.init(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
+
         from notifier import send as tg_send
-        tg_send(f"岁己SUI 微博监控已启动\n当前状态: {'在线' if self.last_status == 'online' else '离线'}", log_fn=self.log)
+        tg_send(f"岁己SUI 微博监控已启动\n当前状态: {'在线' if self.last_status == 'online' else '离线'}\n命令: /status /today /stats /log /help", log_fn=self.log)
 
         try:
             while True:
                 self.check_and_log()
                 self.heartbeat()
                 self.daily_heartbeat()
+                tg_commands.check_updates(self)
                 time.sleep(POLL_INTERVAL)
         except KeyboardInterrupt:
             self.log("[退出] 收到中断信号，正在关闭...")
