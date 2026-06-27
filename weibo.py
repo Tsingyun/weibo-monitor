@@ -1,14 +1,14 @@
-# 微博超话 API 请求模块
+"""微博超话 API 请求模块 - 带重试和指数退避"""
 
-import urllib.request
-import json
+import time
 import ssl
-from config import WEIBO_COOKIE, WEIBO_CONTAINERID
+import json
+import urllib.request
+from config import WEIBO_COOKIE, WEIBO_CONTAINERID, REQUEST_TIMEOUT, RETRY_COUNT
 
 API_URL = f"https://m.weibo.cn/api/container/getIndex?containerid={WEIBO_CONTAINERID}_-_live"
 
-def fetch_desc1():
-    """请求超话 API 获取 desc1 字段（在线状态）"""
+def _build_request():
     req = urllib.request.Request(API_URL)
     req.add_header("User-Agent",
         "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
@@ -16,15 +16,28 @@ def fetch_desc1():
     req.add_header("Cookie", WEIBO_COOKIE)
     req.add_header("Referer", "https://m.weibo.cn/")
     req.add_header("Accept", "application/json, text/plain, */*")
-    ctx = ssl.create_default_context()
+    return req
 
-    resp = urllib.request.urlopen(req, timeout=15)
-    data = json.loads(resp.read())
-
-    cards = data.get("data", {}).get("cards", [])
-    for card in cards:
-        cg = card.get("card_group", [])
-        for g in cg:
-            if "desc1" in g:
-                return g["desc1"]
-    return None
+def fetch_desc1(log_fn=None):
+    """请求超话 API 获取 desc1 字段（带指数退避重试）"""
+    last_err = None
+    for attempt in range(RETRY_COUNT):
+        try:
+            ctx = ssl.create_default_context()
+            req = _build_request()
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
+                data = json.loads(resp.read())
+            cards = data.get("data", {}).get("cards", [])
+            for card in cards:
+                for g in card.get("card_group", []):
+                    if "desc1" in g:
+                        return g["desc1"]
+            return None
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                json.JSONDecodeError, ssl.SSLError, OSError) as e:
+            last_err = e
+            if log_fn:
+                log_fn(f"微博请求失败 (attempt {attempt+1}/{RETRY_COUNT}): {e}")
+            if attempt < RETRY_COUNT - 1:
+                time.sleep(min(2 ** attempt, 30))  # 1s, 2s, 4s... max 30s
+    raise last_err if last_err else RuntimeError("微博请求失败")

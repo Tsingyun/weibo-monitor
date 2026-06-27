@@ -1,13 +1,16 @@
-# 环境变量（含密钥，不提交）
+# 环境变量（含密钥，绝对不提交）
 .env
 
 # 日志和运行时数据
 logs/
 data/stats.json
+backups/
 
 # Python
+venv/
 __pycache__/
 *.pyc
+*.pyo
 
 # IDE
 .vscode/
@@ -16,3 +19,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Windows 批处理（服务器不需要）
+*.bat
