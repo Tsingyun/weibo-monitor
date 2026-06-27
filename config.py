@@ -3,7 +3,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ===== 必填配置（无默认值，启动即校验）=====
 WEIBO_COOKIE = os.getenv("WEIBO_COOKIE")
