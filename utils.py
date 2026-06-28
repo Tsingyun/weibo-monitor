@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 def beijing_now():
     """返回北京时间（UTC+8）"""
-    return datetime.now(timezone.utc) + timedelta(hours=8)
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
 
 def beijing_str(dt=None):
     if dt is None:
