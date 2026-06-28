@@ -182,6 +182,11 @@ class Monitor:
             if now_status == "offline" and online_at:
                 dur = (now - online_at).total_seconds()
                 msg += f"\n持续在线: {format_duration(dur)}"
+            # 晨间上线提醒（6:00-8:59 归属日期存疑，提醒人工判断）
+            if now_status == "online" and 6 <= now.hour < 9:
+                yesterday = (now - timedelta(hours=24)).strftime("%Y-%m-%d")
+                today = now.strftime("%Y-%m-%d")
+                msg += f"\n\n⏰ 晨间上线 (06:00-09:00)\n归属日期可能有争议\n人工确认: {yesterday} 还是 {today}？"
 
             self.log(msg)
             tg_notify(msg, log_fn=self.log)
