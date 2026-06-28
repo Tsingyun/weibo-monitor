@@ -226,7 +226,6 @@ class Monitor:
                 f"累计检查: {self.total_checks}次\n"
                 f"累计通知: {self.total_notifications}次\n"
                 f"当前状态: {status}\n"
-                f"服务器: Google Cloud e2-micro\n"
                 "————————"
             )
             tg_send(msg, log_fn=self.log)
