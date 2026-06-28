@@ -89,10 +89,29 @@ def handle_command(text, monitor):
     if cmd == "/status":
         s = "在线 🟢" if monitor.last_status == "online" else "离线 🔴"
         elapsed = format_duration((beijing_now() - monitor.start_time).total_seconds())
+
+        # 从日志获取最近一次事件的时间和状态
+        logs = monitor.read_log()
+        last_event = logs[-1] if logs else None
+        last_time = last_event["time"] if last_event else "暂无"
+        last_status = last_event["status"] if last_event else None
+        last_label = "🟢 上线" if last_status == "online" else ("🔴 下线" if last_status == "offline" else "未知")
+
+        # 计算距离最后一次下线的时长（如果是离线状态）
+        offline_info = ""
+        if monitor.last_status == "offline" and last_event:
+            try:
+                from datetime import datetime
+                lt = datetime.strptime(last_event["time"], "%Y-%m-%d %H:%M:%S")
+                offline_dur = format_duration((beijing_now() - lt).total_seconds())
+                offline_info = f"\n已离线: {offline_dur}"
+            except Exception:
+                pass
+
         return (
             f"岁己SUI 微博监控\n\n"
             f"当前状态: {s}\n"
-            f"最后事件: {monitor.last_desc1 or '未知'}\n"
+            f"上次事件: {last_label} · {last_time}{offline_info}\n"
             f"运行时间: {elapsed}\n"
             f"累计检查: {monitor.total_checks} 次\n"
             f"累计通知: {monitor.total_notifications} 次"
