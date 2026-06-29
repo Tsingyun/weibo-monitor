@@ -33,20 +33,18 @@ def write_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def is_online(desc1):
-    """判断在线状态（容错匹配，防止微博改文案后漏检）"""
+    """判断在线状态（白名单模式：只认确定'当前在线'文案，其余全部离线）
+
+    微博超话 desc1 在线/离线文案汇总：
+      当前在线: "微博在线了"
+      离线(各种): "n分钟前在线了"/"昨天HH:MM在线了"/"前天..."/
+                 "M-D在线了"/"YYYY-M-D在线了"/"n天前在线了"
+    """
     if not desc1:
         return False
     desc1 = desc1.strip()
-    # 精确匹配
-    if desc1 == "微博在线了":
-        return True
-    # 容错：包含"在线了"且不含时间前缀词（排除各种过去时态）
-    #   n分钟/小时前在线了、昨天/前天HH:MM在线了、n天前在线了 → 均为离线
-    _offline_prefixes = ("前", "昨天", "前天", "天前")
-    if "在线了" in desc1 and not any(p in desc1 for p in _offline_prefixes):
-        return True
-    # 容错：微博在线（无"了"）
-    if desc1 == "微博在线":
+    # 白名单: 只有这两种文案表示当前真正在线
+    if desc1 in ("微博在线了", "微博在线"):
         return True
     return False
 
