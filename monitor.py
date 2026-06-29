@@ -140,7 +140,7 @@ class Monitor:
 
     # ---- 主巡检 ----
     def check_and_log(self):
-        from weibo import fetch_desc1
+        from weibo import fetch_desc1, CookieExpiredError
         from notifier import notify as tg_notify, send as tg_send
 
         try:
@@ -193,6 +193,15 @@ class Monitor:
 
             self.last_status = now_status
             self.last_desc1 = desc1
+
+        except CookieExpiredError:
+            # Cookie 过期 → 立即告警，不等待累积计数
+            self.log("[FATAL] Cookie 已过期，监控暂停")
+            tg_send("🚨 Cookie 已过期！\n请重新获取微博 Cookie 并更新 .env 中的 WEIBO_COOKIE", log_fn=self.log)
+            # 暂停轮询避免继续刷无效请求
+            from notifier import send as tg_send2
+            tg_send2("💤 监控已自动暂停，更新 Cookie 后重启程序即可恢复", log_fn=self.log)
+            raise  # 上抛终止主循环
 
         except Exception as e:
             self.consecutive_errors += 1

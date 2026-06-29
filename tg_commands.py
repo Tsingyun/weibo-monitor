@@ -83,6 +83,8 @@ def handle_command(text, monitor):
             "/log - 最近 10 条日志\n"
             "/daily - 每日上线次数图表\n"
             "/hourly - 24H 时段分布图\n"
+            "/weekly - 本周统计报告\n"
+            "/monthly - 本月统计报告\n"
             "/help - 显示此帮助"
         ), None
 
@@ -182,7 +184,37 @@ def handle_command(text, monitor):
             return f"图表生成失败: {e}", None
         return "暂无图表数据", None
 
+    if cmd == "/weekly":
+        return _period_report(monitor, 7, "本周"), None
+
+    if cmd == "/monthly":
+        return _period_report(monitor, 30, "本月"), None
+
     return None, None  # 未知命令
+
+def _period_report(monitor, days, label):
+    """生成周/月报告（文本统计）"""
+    stats = monitor.compute_stats()
+    if stats.get("empty"):
+        return "暂无数据"
+    daily = stats.get("merged_daily", [])
+    recent = daily[-days:] if len(daily) > days else daily
+    if not recent:
+        return "暂无数据"
+
+    total_online = sum(d.get("count", 0) or 0 for d in recent)
+    active_days = sum(1 for d in recent if (d.get("count") or 0) > 0)
+    max_day = max(recent, key=lambda d: d.get("count") or 0)
+    dates = f"{recent[0]['date']} ~ {recent[-1]['date']}"
+
+    return (
+        f"{label}统计报告\n"
+        f"{dates}\n\n"
+        f"总上线次数: {total_online} 次\n"
+        f"日均上线: {'{:.1f}'.format(total_online / max(1, active_days))} 次\n"
+        f"活跃天数: {active_days}/{len(recent)} 天\n"
+        f"最高单日: {max_day['date']} ({max_day['count']} 次)"
+    )
 
 def check_updates(monitor):
     """检查并处理 Telegram 新消息（在主循环中调用）"""

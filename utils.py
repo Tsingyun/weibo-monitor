@@ -33,7 +33,20 @@ def write_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def is_online(desc1):
-    return desc1 and desc1.strip() == "微博在线了"
+    """判断在线状态（容错匹配，防止微博改文案后漏检）"""
+    if not desc1:
+        return False
+    desc1 = desc1.strip()
+    # 精确匹配
+    if desc1 == "微博在线了":
+        return True
+    # 容错：包含"在线了"且不含"前"（排除"n分钟前在线了"）
+    if "在线了" in desc1 and "前" not in desc1:
+        return True
+    # 容错：微博在线（无"了"）
+    if desc1 == "微博在线":
+        return True
+    return False
 
 def format_duration(seconds):
     """格式化时长：X天X小时X分钟"""

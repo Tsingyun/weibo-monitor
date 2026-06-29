@@ -42,25 +42,23 @@ def _style(ax, title=""):
     if title:
         ax.set_title(title, fontsize=12, fontweight=600, color=FG, pad=10)
 
-def daily_chart(stats):
+def daily_chart(stats, days=60, title=""):
     """每日上线次数柱状图"""
     data = stats.get("merged_daily", [])
     if not data:
         return None
 
-    # 取最近 60 天
-    recent = data[-60:] if len(data) > 60 else data
+    recent = data[-days:] if len(data) > days else data
     dates = [d["date"] for d in recent]
     counts = [d["count"] if d["count"] is not None else 0 for d in recent]
-    # 短标签
     labels = [d[-5:] for d in dates]  # MM-DD
 
     fig, ax = plt.subplots(figsize=(12, 4))
     colors = [ACCENT if c >= 20 else ACCENT2 if c >= 10 else "#93B4F5" for c in counts]
     ax.bar(range(len(counts)), counts, color=colors, width=0.8, edgecolor="white", linewidth=0.3)
-    ax.set_xticks(range(0, len(labels), max(1, len(labels) // 15)))
-    ax.set_xticklabels([labels[i] for i in range(0, len(labels), max(1, len(labels) // 15))])
-    _style(ax, "每日上线次数")
+    ax.set_xticks(range(0, len(labels), max(1, len(labels) // max(7, days // 4))))
+    ax.set_xticklabels([labels[i] for i in range(0, len(labels), max(1, len(labels) // max(7, days // 4)))])
+    _style(ax, title or "每日上线次数")
     ax.set_ylabel("次" if not _USE_EN else "count", color=MFG)
     ax.grid(axis="y", color=BORDER, linewidth=0.5)
     plt.tight_layout()
