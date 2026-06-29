@@ -40,8 +40,10 @@ def is_online(desc1):
     # 精确匹配
     if desc1 == "微博在线了":
         return True
-    # 容错：包含"在线了"且不含"前"（排除"n分钟前在线了"）
-    if "在线了" in desc1 and "前" not in desc1:
+    # 容错：包含"在线了"且不含时间前缀词（排除各种过去时态）
+    #   n分钟/小时前在线了、昨天/前天HH:MM在线了、n天前在线了 → 均为离线
+    _offline_prefixes = ("前", "昨天", "前天", "天前")
+    if "在线了" in desc1 and not any(p in desc1 for p in _offline_prefixes):
         return True
     # 容错：微博在线（无"了"）
     if desc1 == "微博在线":
