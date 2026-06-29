@@ -24,6 +24,7 @@ class Monitor:
         self.start_time = beijing_now()
         self.total_checks = 0
         self.total_notifications = 0
+        self._first_poll = True  # 跳过恢复状态后的首次通知
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -159,6 +160,14 @@ class Monitor:
             now = beijing_now()
             now_status = "online" if is_online(desc1) else "offline"
 
+            # 首次轮询：只同步状态，不发送通知（避免启动时发送过往消息）
+            if self._first_poll:
+                self._first_poll = False
+                self.last_status = now_status
+                self.last_desc1 = desc1
+                self.log(f"[就绪] 首次轮询完成，当前状态: {'在线' if now_status == 'online' else '离线'}")
+                return
+
             # 仅在状态真正变化时通知
             if now_status == self.last_status:
                 return  # 状态未变，跳过
@@ -258,7 +267,7 @@ class Monitor:
         tg_commands.init(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
         from notifier import send as tg_send
-        tg_send(f"岁己SUI 微博监控已启动\n当前状态: {'在线' if self.last_status == 'online' else '离线'}\n命令: /status /today /stats /log /help", log_fn=self.log)
+        tg_send(f"岁己SUI 微博监控已启动\n命令: /status /today /stats /log /help", log_fn=self.log)
 
         try:
             while True:
