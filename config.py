@@ -19,6 +19,11 @@ WEIBO_CONTAINERID = os.getenv("WEIBO_CONTAINERID", "100808f7e22e5e7435023544d44d
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 
+# Bark 推送（iOS 原生推送，替代/补充 Telegram，走 Apple APNs 比 Bot 更可靠）
+# 仅需 BARK_KEY；默认用公共服务器 api.day.app，自建时设 BARK_SERVER 为你的域名
+BARK_KEY = os.getenv("BARK_KEY", "")
+BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
+
 POLL_INTERVAL = int(os.getenv("CHECK_INTERVAL", "15"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))
 RETRY_COUNT = int(os.getenv("RETRY_COUNT", "3"))

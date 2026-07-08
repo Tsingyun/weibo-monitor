@@ -1,16 +1,37 @@
-"""Telegram 通知模块 - 带重试和长消息自动分段"""
+"""通知模块 - 多通道支持: Telegram + Bark
+
+设计:
+- 事件通知 (notify / send) 会推送到【所有已启用】的通道 (Telegram + Bark)
+- 命令回复走 tg_commands 自有 _send (Telegram 专用), 不经过本模块, 不会推到 Bark
+- 每个通道独立启用: 配了对应 key 就发, 没配的不影响其它通道
+
+Bark: iOS 原生推送 (Apple APNs), 比 Telegram Bot 在 iOS 上更可靠/更及时。
+      仅需 BARK_KEY; 默认用公共服务器 api.day.app, 也可设 BARK_SERVER 自建。
+"""
 
 import time
 import json
 import urllib.request
 import urllib.error
-from config import TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT
+from config import (
+    TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT,
+    BARK_KEY, BARK_SERVER,
+)
 
 TELEGRAM_MAX_LENGTH = 4096
 
-def enabled():
+# ===== 启用检测 =====
+def tg_enabled():
     return bool(TG_BOT_TOKEN and TG_CHAT_ID)
 
+def bark_enabled():
+    return bool(BARK_KEY)
+
+def enabled():
+    """任一通道启用即返回 True (供调用方判断是否发送)"""
+    return tg_enabled() or bark_enabled()
+
+# ===== 消息分段 (Telegram 4096 限制) =====
 def _chunk_message(text, max_len=TELEGRAM_MAX_LENGTH):
     """将长消息按段落边界切成多段"""
     if len(text.encode('utf-8')) <= max_len:
@@ -25,7 +46,6 @@ def _chunk_message(text, max_len=TELEGRAM_MAX_LENGTH):
                 chunks.append(current)
                 current = line
             else:
-                # 单行超长 → 强制截断
                 while len(line.encode('utf-8')) > max_len:
                     chunks.append(line[:max_len//2])
                     line = line[max_len//2:]
@@ -36,8 +56,9 @@ def _chunk_message(text, max_len=TELEGRAM_MAX_LENGTH):
         chunks.append(current)
     return chunks
 
-def _send_one(message, log_fn=None):
-    """发送单条消息（内部，带重试）"""
+# ===== Telegram 通道 =====
+def _tg_send_one(message, log_fn=None):
+    """发送单条 Telegram 消息 (带重试)"""
     for attempt in range(3):
         try:
             url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
@@ -57,21 +78,54 @@ def _send_one(message, log_fn=None):
                 time.sleep(min(2 ** attempt, 10))
     return False
 
+# ===== Bark 通道 (iOS 原生推送) =====
+def _bark_send_one(message, log_fn=None):
+    """发送单条消息到 Bark (走 Apple 原生推送, iOS 秒到)"""
+    for attempt in range(3):
+        try:
+            url = f"{BARK_SERVER}/{BARK_KEY}"
+            payload = {
+                "title": "岁己SUI 微博监控",
+                "body": message,
+                "level": "active",   # 横幅 + 声音
+                "sound": "minuet",
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+                result = json.loads(resp.read())
+                if result.get("code") == 200:
+                    return True
+                if log_fn:
+                    log_fn(f"Bark 返回错误: {result}")
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                json.JSONDecodeError, OSError) as e:
+            if log_fn:
+                log_fn(f"Bark 发送失败 (attempt {attempt+1}/3): {e}")
+            if attempt < 2:
+                time.sleep(min(2 ** attempt, 10))
+    return False
+
+# ===== 聚合发送 =====
 def send(message, log_fn=None):
-    """发送 Telegram 消息（超长自动分段，带重试）"""
+    """发送消息到所有已启用通道 (Telegram + Bark), 带重试/分段"""
     if not enabled():
         return False
-    chunks = _chunk_message(message)
-    if len(chunks) > 1 and log_fn:
-        log_fn(f"消息超长，分成 {len(chunks)} 段发送")
     ok = True
-    for i, chunk in enumerate(chunks):
-        text = chunk if len(chunks) == 1 else f"[{i+1}/{len(chunks)}] {chunk}"
-        if not _send_one(text, log_fn=log_fn):
+    if tg_enabled():
+        chunks = _chunk_message(message)
+        if len(chunks) > 1 and log_fn:
+            log_fn(f"消息超长，分成 {len(chunks)} 段发送 (Telegram)")
+        for i, chunk in enumerate(chunks):
+            text = chunk if len(chunks) == 1 else f"[{i+1}/{len(chunks)}] {chunk}"
+            if not _tg_send_one(text, log_fn=log_fn):
+                ok = False
+    if bark_enabled():
+        if not _bark_send_one(message, log_fn=log_fn):
             ok = False
     return ok
 
 def notify(message, log_fn=None):
-    """统一通知：控制台 + Telegram"""
+    """统一通知: 控制台 + 所有已启用通道"""
     print(message)
     send(message, log_fn=log_fn)
