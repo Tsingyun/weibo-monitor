@@ -15,7 +15,7 @@ import urllib.request
 import urllib.error
 from config import (
     TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT,
-    BARK_KEY, BARK_SERVER,
+    BARK_KEY, BARK_SERVER, BARK_ICON_URL,
 )
 
 TELEGRAM_MAX_LENGTH = 4096
@@ -79,13 +79,14 @@ def _tg_send_one(message, log_fn=None):
     return False
 
 # ===== Bark 通道 (iOS 原生推送) =====
-def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None):
+def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, icon=None):
     """发送单条消息到 Bark (走 Apple 原生推送, iOS 秒到)
 
     参数:
       title: 推送标题 (默认 "岁己SUI 微博监控")
       level: active(横幅+声,默认) / passive(仅通知中心不响) / critical(紧急响铃)
       sound: 铃声名 (如 minuet/alarm); None 则不响铃
+      icon: 推送图标 URL (iOS15+, 默认用 BARK_ICON_URL 配置的鸽子图标)
     """
     for attempt in range(3):
         try:
@@ -94,12 +95,12 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None):
                 "title": title or "岁己SUI 微博监控",
                 "body": message,
                 "level": level or "active",
-                "group": "岁己SUI微博监控",   # 分组, 在通知中心归并
+                "group": "\u5c81\u5df1SUI\u5fae\u535a\u76d1\u63a7",   # 分组: 岁己SUI微博监控
                 "isArchive": 1,               # 自动保存到历史, 方便回看
+                "icon": icon or BARK_ICON_URL, # 推送图标 (鸽子🐦)
             }
             if sound:
                 payload["sound"] = sound
-            data = json.dumps(payload).encode("utf-8")
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
@@ -117,9 +118,9 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None):
     return False
 
 # ===== 聚合发送 =====
-def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None):
+def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None):
     """发送消息到所有已启用通道 (Telegram + Bark), 带重试/分段。
-    bark_* 参数仅作用于 Bark 通道 (title/level/sound)。"""
+    bark_* 参数仅作用于 Bark 通道 (title/level/sound/icon)。"""
     if not enabled():
         return False
     ok = True
@@ -132,11 +133,11 @@ def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None
             if not _tg_send_one(text, log_fn=log_fn):
                 ok = False
     if bark_enabled():
-        if not _bark_send_one(message, log_fn=log_fn, title=bark_title, level=bark_level, sound=bark_sound):
+        if not _bark_send_one(message, log_fn=log_fn, title=bark_title, level=bark_level, sound=bark_sound, icon=bark_icon):
             ok = False
     return ok
 
-def notify(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None):
+def notify(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None):
     """统一通知: 控制台 + 所有已启用通道。bark_* 仅作用于 Bark 通道。"""
     print(message)
-    send(message, log_fn=log_fn, bark_title=bark_title, bark_level=bark_level, bark_sound=bark_sound)
+    send(message, log_fn=log_fn, bark_title=bark_title, bark_level=bark_level, bark_sound=bark_sound, bark_icon=bark_icon)

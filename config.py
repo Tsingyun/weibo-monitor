@@ -23,6 +23,7 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 # 仅需 BARK_KEY；默认用公共服务器 api.day.app，自建时设 BARK_SERVER 为你的域名
 BARK_KEY = os.getenv("BARK_KEY", "")
 BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
+BARK_ICON_URL = os.getenv("BARK_ICON_URL", "https://raw.githubusercontent.com/Tsingyun/weibo-monitor/main/assets/bark_icon.png")
 
 POLL_INTERVAL = int(os.getenv("CHECK_INTERVAL", "15"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))
