@@ -5,6 +5,7 @@
 logs/
 data/events.json
 data/stats.json
+data/coverage.json
 data/tg_offset.txt
 data/monitor.lock
 backups/

@@ -4,9 +4,10 @@ import time
 from datetime import datetime, timedelta
 from collections import defaultdict
 from config import (
-    EVENT_PATH, STATS_PATH, HISTORY_PATH,
+    EVENT_PATH, STATS_PATH, HISTORY_PATH, COVERAGE_PATH,
     POLL_INTERVAL, REQUEST_TIMEOUT, RETRY_COUNT,
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
+    COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
 )
 from utils import beijing_now, beijing_str, logical_date, is_online, read_json, write_json, format_duration
 
@@ -25,6 +26,7 @@ class Monitor:
         self.total_checks = 0
         self.total_notifications = 0
         self._first_poll = True  # 跳过恢复状态后的首次通知
+        self._last_cov_bucket = None  # 上次写入的覆盖率分桶（避免重复写盘）
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -131,6 +133,118 @@ class Monitor:
     def save_stats(self):
         write_json(STATS_PATH, self.compute_stats())
 
+    # ---- 覆盖率追踪 ----
+    def mark_coverage(self):
+        """记录一次成功轮询到覆盖率文件（按 COVERAGE_BUCKET_MINUTES 分桶）"""
+        now = beijing_now()
+        date_str = now.strftime("%Y-%m-%d")
+        minutes = now.hour * 60 + now.minute
+        bucket = minutes // COVERAGE_BUCKET_MINUTES
+        # 同一分桶不重复写盘
+        if self._last_cov_bucket == (date_str, bucket):
+            return
+        self._last_cov_bucket = (date_str, bucket)
+        cov = read_json(COVERAGE_PATH, {})
+        day = cov.get(date_str, [])
+        if bucket not in day:
+            day.append(bucket)
+            day.sort()
+            cov[date_str] = day
+            write_json(COVERAGE_PATH, cov)
+
+    def compute_coverage(self):
+        """计算覆盖率与缺失时段（兼容无 coverage.json 的历史数据）"""
+        logs = self.read_log()
+        buckets_per_day = 24 * 60 // COVERAGE_BUCKET_MINUTES
+        cov = read_json(COVERAGE_PATH, {})
+
+        if logs:
+            first_date = logs[0]["time"][:10]
+        else:
+            first_date = beijing_now().strftime("%Y-%m-%d")
+        today = beijing_now().strftime("%Y-%m-%d")
+
+        # 逐日遍历
+        days = []
+        d = datetime.strptime(first_date, "%Y-%m-%d")
+        end = datetime.strptime(today, "%Y-%m-%d")
+        total_buckets = 0
+        covered_buckets = 0
+        while d <= end:
+            ds = d.strftime("%Y-%m-%d")
+            # 优先用覆盖率文件
+            if ds in cov and cov[ds]:
+                covered = set(cov[ds])
+                pct = round(len(covered) / buckets_per_day * 100, 1)
+                # 计算日内缺失时段（连续未覆盖分桶 → 时间范围）
+                missing = []
+                i = 0
+                while i < buckets_per_day:
+                    if i not in covered:
+                        j = i
+                        while j < buckets_per_day and j not in covered:
+                            j += 1
+                        start_min = i * COVERAGE_BUCKET_MINUTES
+                        end_min = j * COVERAGE_BUCKET_MINUTES
+                        missing.append([start_min, min(end_min, 1440)])
+                        i = j
+                    else:
+                        i += 1
+                status = "full" if pct >= 99 else ("partial" if pct > 0 else "missing")
+            else:
+                # 回退：以当日是否有事件判断
+                day_events = [e for e in logs if e["time"][:10] == ds]
+                if day_events:
+                    pct = 100.0
+                    missing = []
+                    status = "full"
+                else:
+                    pct = 0.0
+                    missing = [[0, 1440]]
+                    status = "missing"
+            total_buckets += buckets_per_day
+            covered_buckets += int(round(pct / 100 * buckets_per_day))
+            days.append({
+                "date": ds,
+                "pct": pct,
+                "status": status,
+                "missing_ranges": missing,
+                "event_count": len([e for e in logs if e["time"][:10] == ds]),
+            })
+            d += timedelta(days=1)
+
+        # 缺失天数与跨天缺失时段
+        missing_days = [x["date"] for x in days if x["status"] == "missing"]
+        # 合并连续缺失天为区间
+        missing_spans = []
+        if missing_days:
+            span_start = missing_days[0]
+            prev = missing_days[0]
+            for md in missing_days[1:]:
+                if (datetime.strptime(md, "%Y-%m-%d") - datetime.strptime(prev, "%Y-%m-%d")).days == 1:
+                    prev = md
+                else:
+                    missing_spans.append([span_start, prev])
+                    span_start = md
+                    prev = md
+            missing_spans.append([span_start, prev])
+
+        # 疑似不完整天（有数据但事件数极少，可能漏采）
+        suspicious_days = [x["date"] for x in days
+                           if x["status"] != "missing"
+                           and 0 < x["event_count"] < MISSING_EVENT_THRESHOLD]
+
+        overall_pct = round(covered_buckets / total_buckets * 100, 1) if total_buckets else 0
+
+        return {
+            "days": days,
+            "missing_days": missing_days,
+            "missing_spans": missing_spans,
+            "suspicious_days": suspicious_days,
+            "overall_pct": overall_pct,
+            "bucket_minutes": COVERAGE_BUCKET_MINUTES,
+        }
+
     # ---- 状态管理 ----
     def restore_state(self):
         logs = self.read_log()
@@ -148,6 +262,9 @@ class Monitor:
             desc1 = fetch_desc1(log_fn=self.log)
             if not desc1:
                 return
+
+            # 记录一次成功轮询（覆盖率追踪）
+            self.mark_coverage()
 
             # 恢复后清除错误计数
             if self.consecutive_errors > 0:

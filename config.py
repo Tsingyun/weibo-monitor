@@ -40,3 +40,9 @@ LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "10"))
 EVENT_PATH = os.path.join(BASE_DIR, "data", "events.json")     # JSON 事件日志（监控数据）
 STATS_PATH = os.path.join(BASE_DIR, "data", "stats.json")      # 统计缓存
 HISTORY_PATH = os.path.join(BASE_DIR, "data", "history.json")  # 历史每日数据
+COVERAGE_PATH = os.path.join(BASE_DIR, "data", "coverage.json") # 监控覆盖率记录（5分钟粒度）
+
+# 覆盖率分桶粒度（分钟）
+COVERAGE_BUCKET_MINUTES = int(os.getenv("COVERAGE_BUCKET_MINUTES", "5"))
+# 单日视为"疑似缺失"的事件数阈值（低于此值该天数据可能不完整）
+MISSING_EVENT_THRESHOLD = int(os.getenv("MISSING_EVENT_THRESHOLD", "3"))
