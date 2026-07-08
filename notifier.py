@@ -15,7 +15,7 @@ import urllib.request
 import urllib.error
 from config import (
     TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT,
-    BARK_KEY, BARK_SERVER, BARK_ICON_URL,
+    BARK_KEY, BARK_SERVER, BARK_ICON_URL, BARK_SOUND_URL,
 )
 
 TELEGRAM_MAX_LENGTH = 4096
@@ -85,12 +85,15 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
     参数:
       title: 推送标题 (默认 "岁己SUI 微博监控")
       level: active(横幅+声,默认) / passive(仅通知中心不响) / critical(紧急响铃)
-      sound: 铃声名 (如 minuet/alarm); None 则不响铃
+      sound: None=用默认"波比波"铃声(自定义URL); ""=不响铃;
+             其它字符串=系统铃声名(如 alarm) 或 自定义铃声URL
       icon: 推送图标 URL (iOS15+, 默认用 BARK_ICON_URL 配置的鸽子图标)
     """
     for attempt in range(3):
         try:
             url = f"{BARK_SERVER}/{BARK_KEY}"
+            # sound: None->默认自定义铃声; ""->不响铃; 其它->原样(系统名或URL)
+            effective_sound = BARK_SOUND_URL if sound is None else sound
             payload = {
                 "title": title or "岁己SUI 微博监控",
                 "body": message,
@@ -99,8 +102,8 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
                 "isArchive": 1,               # 自动保存到历史, 方便回看
                 "icon": icon or BARK_ICON_URL, # 推送图标 (鸽子🐦)
             }
-            if sound:
-                payload["sound"] = sound
+            if effective_sound:
+                payload["sound"] = effective_sound
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:

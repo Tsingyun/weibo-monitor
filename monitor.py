@@ -375,7 +375,7 @@ class Monitor:
                 "————————"
             )
             tg_send(msg, log_fn=self.log,
-                    bark_title="微博监控运行摘要", bark_level="passive", bark_sound=None)
+                    bark_title="微博监控运行摘要", bark_level="passive", bark_sound="")
             self._last_daily_hb = now
 
     # ---- 主循环 ----
@@ -392,7 +392,7 @@ class Monitor:
 
         from notifier import send as tg_send
         tg_send(f"岁己SUI 微博监控已启动\n命令: /status /today /stats /log /help", log_fn=self.log,
-                bark_title="监控已启动", bark_level="passive", bark_sound=None)
+                bark_title="监控已启动", bark_level="passive", bark_sound="")
 
         try:
             while True:

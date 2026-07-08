@@ -24,6 +24,7 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 BARK_KEY = os.getenv("BARK_KEY", "")
 BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
 BARK_ICON_URL = os.getenv("BARK_ICON_URL", "https://raw.githubusercontent.com/Tsingyun/weibo-monitor/main/assets/bark_icon.png")
+BARK_SOUND_URL = os.getenv("BARK_SOUND_URL", "https://raw.githubusercontent.com/Tsingyun/weibo-monitor/main/assets/bark_sound.mp3")
 
 POLL_INTERVAL = int(os.getenv("CHECK_INTERVAL", "15"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))
