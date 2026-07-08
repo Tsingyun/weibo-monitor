@@ -269,7 +269,8 @@ class Monitor:
             # 恢复后清除错误计数
             if self.consecutive_errors > 0:
                 duration = (beijing_now() - self.error_start_time).total_seconds()
-                tg_send(f"✅ 微博连接恢复\n中断时间: {beijing_str(self.error_start_time)}\n恢复时间: {beijing_str()}\n中断时长: {format_duration(duration)}", log_fn=self.log)
+                tg_send(f"✅ 微博连接恢复\n中断时间: {beijing_str(self.error_start_time)}\n恢复时间: {beijing_str()}\n中断时长: {format_duration(duration)}", log_fn=self.log,
+                        bark_title="微博连接恢复 ✅", bark_level="active", bark_sound="minuet")
                 self.consecutive_errors = 0
                 self.error_alert_sent = False
 
@@ -315,7 +316,9 @@ class Monitor:
                 msg += f"\n\n⏰ 晨间上线 (06:00-09:00)\n归属日期可能有争议\n人工确认: {yesterday} 还是 {today}？"
 
             self.log(msg)
-            tg_notify(msg, log_fn=self.log)
+            bark_title = "岁己SUI 上线啦 🟢" if now_status == "online" else "岁己SUI 下线了 🔴"
+            tg_notify(msg, log_fn=self.log,
+                      bark_title=bark_title, bark_level="active", bark_sound="minuet")
 
             self.last_status = now_status
             self.last_desc1 = desc1
@@ -323,10 +326,12 @@ class Monitor:
         except CookieExpiredError:
             # Cookie 过期 → 立即告警，不等待累积计数
             self.log("[FATAL] Cookie 已过期，监控暂停")
-            tg_send("🚨 Cookie 已过期！\n请重新获取微博 Cookie 并更新 .env 中的 WEIBO_COOKIE", log_fn=self.log)
+            tg_send("🚨 Cookie 已过期！\n请重新获取微博 Cookie 并更新 .env 中的 WEIBO_COOKIE", log_fn=self.log,
+                    bark_title="⚠️ Cookie 已过期", bark_level="critical", bark_sound="alarm")
             # 暂停轮询避免继续刷无效请求
             from notifier import send as tg_send2
-            tg_send2("💤 监控已自动暂停，更新 Cookie 后重启程序即可恢复", log_fn=self.log)
+            tg_send2("💤 监控已自动暂停，更新 Cookie 后重启程序即可恢复", log_fn=self.log,
+                     bark_title="监控已暂停", bark_level="critical", bark_sound="alarm")
             raise  # 上抛终止主循环
 
         except Exception as e:
@@ -335,7 +340,8 @@ class Monitor:
                 self.error_start_time = beijing_now()
             self.log(f"[ERROR] 微博请求失败 (#{self.consecutive_errors}): {e}")
             if self.consecutive_errors >= 5 and not self.error_alert_sent:
-                tg_send(f"⚠️ 微博请求连续失败 ({self.consecutive_errors}次)\n开始时间: {beijing_str(self.error_start_time)}\n请检查 Cookie 是否过期", log_fn=self.log)
+                tg_send(f"⚠️ 微博请求连续失败 ({self.consecutive_errors}次)\n开始时间: {beijing_str(self.error_start_time)}\n请检查 Cookie 是否过期", log_fn=self.log,
+                        bark_title="⚠️ 微博请求连续失败", bark_level="critical", bark_sound="alarm")
                 self.error_alert_sent = True
 
     # ---- 心跳 ----
@@ -368,7 +374,8 @@ class Monitor:
                 f"当前状态: {status}\n"
                 "————————"
             )
-            tg_send(msg, log_fn=self.log)
+            tg_send(msg, log_fn=self.log,
+                    bark_title="微博监控运行摘要", bark_level="passive", bark_sound=None)
             self._last_daily_hb = now
 
     # ---- 主循环 ----
@@ -384,7 +391,8 @@ class Monitor:
         tg_commands.init(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
         from notifier import send as tg_send
-        tg_send(f"岁己SUI 微博监控已启动\n命令: /status /today /stats /log /help", log_fn=self.log)
+        tg_send(f"岁己SUI 微博监控已启动\n命令: /status /today /stats /log /help", log_fn=self.log,
+                bark_title="监控已启动", bark_level="passive", bark_sound=None)
 
         try:
             while True:
