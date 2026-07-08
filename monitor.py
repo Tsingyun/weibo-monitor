@@ -317,8 +317,16 @@ class Monitor:
 
             self.log(msg)
             bark_title = "岁己SUI 上线啦 🟢" if now_status == "online" else "岁己SUI 下线了 🔴"
+            # 副标题: 上线显示今日次数, 下线显示本次持续时长 (信息分层)
+            today = now.strftime("%Y-%m-%d")
+            today_online = sum(1 for e in logs if e["status"] == "online" and e["time"][:10] == today)
+            if now_status == "online":
+                bark_subtitle = f"今日第 {today_online} 次上线"
+            else:
+                bark_subtitle = f"持续在线 {format_duration(dur)}" if online_at else "已离线"
             tg_notify(msg, log_fn=self.log,
-                      bark_title=bark_title, bark_level="active", bark_sound="minuet")
+                      bark_title=bark_title, bark_level="active", bark_sound="minuet",
+                      bark_subtitle=bark_subtitle)
 
             self.last_status = now_status
             self.last_desc1 = desc1
@@ -327,11 +335,13 @@ class Monitor:
             # Cookie 过期 → 立即告警，不等待累积计数
             self.log("[FATAL] Cookie 已过期，监控暂停")
             tg_send("🚨 Cookie 已过期！\n请重新获取微博 Cookie 并更新 .env 中的 WEIBO_COOKIE", log_fn=self.log,
-                    bark_title="⚠️ Cookie 已过期", bark_level="critical", bark_sound="alarm")
+                    bark_title="⚠️ Cookie 已过期", bark_level="critical", bark_sound="alarm",
+                    bark_call="1", bark_volume=10)
             # 暂停轮询避免继续刷无效请求
             from notifier import send as tg_send2
             tg_send2("💤 监控已自动暂停，更新 Cookie 后重启程序即可恢复", log_fn=self.log,
-                     bark_title="监控已暂停", bark_level="critical", bark_sound="alarm")
+                     bark_title="监控已暂停", bark_level="critical", bark_sound="alarm",
+                     bark_call="1", bark_volume=10)
             raise  # 上抛终止主循环
 
         except Exception as e:
@@ -341,7 +351,8 @@ class Monitor:
             self.log(f"[ERROR] 微博请求失败 (#{self.consecutive_errors}): {e}")
             if self.consecutive_errors >= 5 and not self.error_alert_sent:
                 tg_send(f"⚠️ 微博请求连续失败 ({self.consecutive_errors}次)\n开始时间: {beijing_str(self.error_start_time)}\n请检查 Cookie 是否过期", log_fn=self.log,
-                        bark_title="⚠️ 微博请求连续失败", bark_level="critical", bark_sound="alarm")
+                        bark_title="⚠️ 微博请求连续失败", bark_level="critical", bark_sound="alarm",
+                        bark_call="1", bark_volume=10)
                 self.error_alert_sent = True
 
     # ---- 心跳 ----

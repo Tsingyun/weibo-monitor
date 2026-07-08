@@ -25,6 +25,8 @@ BARK_KEY = os.getenv("BARK_KEY", "")
 BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
 BARK_ICON_URL = os.getenv("BARK_ICON_URL", "https://raw.githubusercontent.com/Tsingyun/weibo-monitor/main/assets/bark_icon.png")
 BARK_SOUND_URL = os.getenv("BARK_SOUND_URL", "https://raw.githubusercontent.com/Tsingyun/weibo-monitor/main/assets/bark_sound.mp3")
+# 点击推送时跳转的地址（岁己微博主页，手机可直达）。如需点开本地面板可改为 http://localhost:8765
+BARK_CLICK_URL = os.getenv("BARK_CLICK_URL", "https://m.weibo.cn/u/7785772638")
 
 POLL_INTERVAL = int(os.getenv("CHECK_INTERVAL", "15"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))

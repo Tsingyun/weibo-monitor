@@ -15,7 +15,7 @@ import urllib.request
 import urllib.error
 from config import (
     TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT,
-    BARK_KEY, BARK_SERVER, BARK_ICON_URL, BARK_SOUND_URL,
+    BARK_KEY, BARK_SERVER, BARK_ICON_URL, BARK_SOUND_URL, BARK_CLICK_URL,
 )
 
 TELEGRAM_MAX_LENGTH = 4096
@@ -79,21 +79,28 @@ def _tg_send_one(message, log_fn=None):
     return False
 
 # ===== Bark 通道 (iOS 原生推送) =====
-def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, icon=None):
+def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, icon=None,
+                   subtitle=None, url=None, call=None, volume=None):
     """发送单条消息到 Bark (走 Apple 原生推送, iOS 秒到)
 
     参数:
       title: 推送标题 (默认 "岁己SUI 微博监控")
-      level: active(横幅+声,默认) / passive(仅通知中心不响) / critical(紧急响铃)
+      level: active(横幅+声,默认) / passive(仅通知中心不响) / critical(紧急响铃) / timeSensitive
       sound: None=用默认"波比波"铃声(自定义URL); ""=不响铃;
              其它字符串=系统铃声名(如 alarm) 或 自定义铃声URL
       icon: 推送图标 URL (iOS15+, 默认用 BARK_ICON_URL 配置的鸽子图标)
+      subtitle: 副标题 (信息分层, 如 "今日第3次上线")
+      url: 点击推送跳转地址 (默认 BARK_CLICK_URL 岁己主页); 传 "" 则不跳转
+      call: "1" 时通知铃声循环播放 (用于紧急事件确保注意到)
+      volume: 紧急警告音量 0-10 (仅 critical 级别生效, 不传默认 5)
     """
     for attempt in range(3):
         try:
-            url = f"{BARK_SERVER}/{BARK_KEY}"
+            api_url = f"{BARK_SERVER}/{BARK_KEY}"
             # sound: None->默认自定义铃声; ""->不响铃; 其它->原样(系统名或URL)
             effective_sound = BARK_SOUND_URL if sound is None else sound
+            # url: 显式传 "" 表示不跳转; 否则用传入值或默认点击地址
+            effective_url = url if url is not None else BARK_CLICK_URL
             payload = {
                 "title": title or "岁己SUI 微博监控",
                 "body": message,
@@ -104,8 +111,16 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
             }
             if effective_sound:
                 payload["sound"] = effective_sound
+            if subtitle:
+                payload["subtitle"] = subtitle
+            if effective_url:
+                payload["url"] = effective_url
+            if call:
+                payload["call"] = call          # "1" 循环响铃
+            if volume is not None:
+                payload["volume"] = volume      # 0-10
             data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
                 result = json.loads(resp.read())
                 if result.get("code") == 200:
@@ -121,9 +136,10 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
     return False
 
 # ===== 聚合发送 =====
-def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None):
+def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None,
+          bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None):
     """发送消息到所有已启用通道 (Telegram + Bark), 带重试/分段。
-    bark_* 参数仅作用于 Bark 通道 (title/level/sound/icon)。"""
+    bark_* 参数仅作用于 Bark 通道 (title/level/sound/icon/subtitle/url/call/volume)。"""
     if not enabled():
         return False
     ok = True
@@ -136,11 +152,16 @@ def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None
             if not _tg_send_one(text, log_fn=log_fn):
                 ok = False
     if bark_enabled():
-        if not _bark_send_one(message, log_fn=log_fn, title=bark_title, level=bark_level, sound=bark_sound, icon=bark_icon):
+        if not _bark_send_one(message, log_fn=log_fn, title=bark_title, level=bark_level,
+                              sound=bark_sound, icon=bark_icon, subtitle=bark_subtitle,
+                              url=bark_url, call=bark_call, volume=bark_volume):
             ok = False
     return ok
 
-def notify(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None):
+def notify(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None,
+           bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None):
     """统一通知: 控制台 + 所有已启用通道。bark_* 仅作用于 Bark 通道。"""
     print(message)
-    send(message, log_fn=log_fn, bark_title=bark_title, bark_level=bark_level, bark_sound=bark_sound, bark_icon=bark_icon)
+    send(message, log_fn=log_fn, bark_title=bark_title, bark_level=bark_level, bark_sound=bark_sound,
+         bark_icon=bark_icon, bark_subtitle=bark_subtitle, bark_url=bark_url,
+         bark_call=bark_call, bark_volume=bark_volume)
