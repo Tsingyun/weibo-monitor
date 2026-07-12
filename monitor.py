@@ -270,7 +270,7 @@ class Monitor:
             if self.consecutive_errors > 0:
                 duration = (beijing_now() - self.error_start_time).total_seconds()
                 tg_send(f"✅ 微博连接恢复\n中断时间: {beijing_str(self.error_start_time)}\n恢复时间: {beijing_str()}\n中断时长: {format_duration(duration)}", log_fn=self.log,
-                        bark_title="微博连接恢复 ✅", bark_level="active", bark_sound="minuet")
+                        bark_title="微博连接恢复 ✅", bark_level="active", bark_sound=None)
                 self.consecutive_errors = 0
                 self.error_alert_sent = False
 
@@ -325,7 +325,7 @@ class Monitor:
             else:
                 bark_subtitle = f"持续在线 {format_duration(dur)}" if online_at else "已离线"
             tg_notify(msg, log_fn=self.log,
-                      bark_title=bark_title, bark_level="active", bark_sound="minuet",
+                      bark_title=bark_title, bark_level="active", bark_sound=None,
                       bark_subtitle=bark_subtitle)
 
             self.last_status = now_status
