@@ -16,14 +16,18 @@ def acquire_lock():
             with open(LOCK_FILE) as f:
                 old_pid = int(f.read().strip())
             # 检查旧进程是否仍在运行
-            try:
-                os.kill(old_pid, 0)  # 信号 0 不杀死进程，仅检测存在
-                print(f"❌ 监控已在运行中 (PID: {old_pid})")
-                print("   如需重启，请先关闭现有实例")
-                return False
-            except (OSError, ProcessLookupError):
-                # 旧进程已退出，锁文件是残留的
+            if old_pid == os.getpid():
+                # 锁文件里的 PID 是当前进程自身，可能是残留，直接删除
                 os.remove(LOCK_FILE)
+            else:
+                try:
+                    os.kill(old_pid, 0)  # 信号 0 不杀死进程，仅检测存在
+                    print(f"❌ 监控已在运行中 (PID: {old_pid})")
+                    print("   如需重启，请先关闭现有实例")
+                    return False
+                except (OSError, ProcessLookupError):
+                    # 旧进程已退出，锁文件是残留的
+                    os.remove(LOCK_FILE)
         except (ValueError, OSError):
             os.remove(LOCK_FILE)
 
