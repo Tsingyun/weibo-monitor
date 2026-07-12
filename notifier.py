@@ -16,9 +16,19 @@ import urllib.error
 from config import (
     TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT,
     BARK_KEY, BARK_SERVER, BARK_ICON_URL, BARK_SOUND_URL, BARK_CLICK_URL,
+    BARK_PROXY, TELEGRAM_PROXY, BARK_TIMEOUT,
 )
 
 TELEGRAM_MAX_LENGTH = 4096
+
+# ===== 代理支持 =====
+def _build_opener(proxy):
+    """若有代理地址则返回带 ProxyHandler 的 opener, 否则返回默认 opener (均有 .open 方法)"""
+    if proxy:
+        handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        return urllib.request.build_opener(handler)
+    return urllib.request.build_opener()
+
 
 # ===== 启用检测 =====
 def tg_enabled():
@@ -59,12 +69,13 @@ def _chunk_message(text, max_len=TELEGRAM_MAX_LENGTH):
 # ===== Telegram 通道 =====
 def _tg_send_one(message, log_fn=None):
     """发送单条 Telegram 消息 (带重试)"""
-    for attempt in range(3):
+    opener = _build_opener(TELEGRAM_PROXY)
+    for attempt in range(2):
         try:
             url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
             data = json.dumps({"chat_id": TG_CHAT_ID, "text": message}).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            with opener.open(req, timeout=REQUEST_TIMEOUT) as resp:
                 result = json.loads(resp.read())
                 if result.get("ok"):
                     return True
@@ -73,9 +84,11 @@ def _tg_send_one(message, log_fn=None):
         except (urllib.error.URLError, urllib.error.HTTPError,
                 json.JSONDecodeError, OSError) as e:
             if log_fn:
-                log_fn(f"Telegram 发送失败 (attempt {attempt+1}/3): {e}")
-            if attempt < 2:
-                time.sleep(min(2 ** attempt, 10))
+                log_fn(f"Telegram 发送失败 (attempt {attempt+1}/2): {e}")
+            if attempt < 1:
+                time.sleep(1)
+                continue
+            return False
     return False
 
 # ===== Bark 通道 (iOS 原生推送) =====
@@ -94,7 +107,8 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
       call: "1" 时通知铃声循环播放 (用于紧急事件确保注意到)
       volume: 紧急警告音量 0-10 (仅 critical 级别生效, 不传默认 5)
     """
-    for attempt in range(3):
+    opener = _build_opener(BARK_PROXY)
+    for attempt in range(2):
         try:
             api_url = f"{BARK_SERVER}/{BARK_KEY}"
             # sound: None->默认自定义铃声; ""->不响铃; 其它->原样(系统名或URL)
@@ -121,7 +135,7 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
                 payload["volume"] = volume      # 0-10
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            with opener.open(req, timeout=BARK_TIMEOUT) as resp:
                 result = json.loads(resp.read())
                 if result.get("code") == 200:
                     return True
@@ -130,9 +144,11 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
         except (urllib.error.URLError, urllib.error.HTTPError,
                 json.JSONDecodeError, OSError) as e:
             if log_fn:
-                log_fn(f"Bark 发送失败 (attempt {attempt+1}/3): {e}")
-            if attempt < 2:
-                time.sleep(min(2 ** attempt, 10))
+                log_fn(f"Bark 发送失败 (attempt {attempt+1}/2): {e}")
+            if attempt < 1:
+                time.sleep(1)
+                continue
+            return False
     return False
 
 # ===== 聚合发送 =====

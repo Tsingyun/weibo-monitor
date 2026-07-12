@@ -28,6 +28,21 @@ BARK_SOUND_URL = os.getenv("BARK_SOUND_URL", "https://raw.githubusercontent.com/
 # 点击推送时跳转的地址（岁己微博主页，手机可直达）。如需点开本地面板可改为 http://localhost:8765
 BARK_CLICK_URL = os.getenv("BARK_CLICK_URL", "https://m.weibo.cn/u/7785772638")
 
+# ===== 代理 & 超时（可选）=====
+# 在受限网络下（如 api.day.app 连不上），可让 Bark/Telegram 走代理访问
+#   直接设 BARK_PROXY / TELEGRAM_PROXY；留空则自动读取系统 HTTPS_PROXY/https_proxy 环境变量
+# 例: BARK_PROXY=http://127.0.0.1:7890
+def _first_env(*names, default=""):
+    for _n in names:
+        _v = os.getenv(_n)
+        if _v:
+            return _v
+    return default
+BARK_PROXY = os.getenv("BARK_PROXY", _first_env("HTTPS_PROXY", "https_proxy"))
+TELEGRAM_PROXY = os.getenv("TELEGRAM_PROXY", _first_env("HTTPS_PROXY", "https_proxy"))
+# Bark 推送超时（秒）：api.day.app 在某些网络下连不上，缩短超时避免阻塞主轮询
+BARK_TIMEOUT = int(os.getenv("BARK_TIMEOUT", "8"))
+
 POLL_INTERVAL = int(os.getenv("CHECK_INTERVAL", "15"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))
 RETRY_COUNT = int(os.getenv("RETRY_COUNT", "3"))
