@@ -25,8 +25,8 @@ def acquire_lock():
                     print(f"❌ 监控已在运行中 (PID: {old_pid})")
                     print("   如需重启，请先关闭现有实例")
                     return False
-                except (OSError, ProcessLookupError):
-                    # 旧进程已退出，锁文件是残留的
+                except (OSError, ProcessLookupError, SystemError):
+                    # 旧进程已退出或 PID 无效，锁文件是残留的
                     os.remove(LOCK_FILE)
         except (ValueError, OSError):
             os.remove(LOCK_FILE)
