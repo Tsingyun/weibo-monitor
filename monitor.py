@@ -309,17 +309,21 @@ class Monitor:
             if now_status == "offline" and online_at:
                 dur = (now - online_at).total_seconds()
                 msg += f"\n持续在线: {format_duration(dur)}"
-            # 晨间上线提醒（6:00-8:59 归属日期存疑，提醒人工判断）
-            if now_status == "online" and 6 <= now.hour < 9:
-                yesterday = (now - timedelta(hours=24)).strftime("%Y-%m-%d")
-                today = now.strftime("%Y-%m-%d")
-                msg += f"\n\n⏰ 晨间上线 (06:00-09:00)\n归属日期可能有争议\n人工确认: {yesterday} 还是 {today}？"
 
             self.log(msg)
             bark_title = "岁己SUI 上线啦 🟢" if now_status == "online" else "岁己SUI 下线了 🔴"
             # 副标题: 上线显示今日次数, 下线显示本次持续时长 (信息分层)
-            today = now.strftime("%Y-%m-%d")
-            today_online = sum(1 for e in logs if e["status"] == "online" and e["time"][:10] == today)
+            # 用 logical_date 统一"今天"的界定（按岁己作息日界），与 stats 统计保持一致
+            today_logical = logical_date(now, DAY_BOUNDARY_HOUR)
+            today_online = 0
+            for e in logs:
+                if e["status"] == "online":
+                    try:
+                        edt = datetime.strptime(e["time"], "%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        continue
+                    if logical_date(edt, DAY_BOUNDARY_HOUR) == today_logical:
+                        today_online += 1
             if now_status == "online":
                 bark_subtitle = f"今日第 {today_online} 次上线"
             else:
