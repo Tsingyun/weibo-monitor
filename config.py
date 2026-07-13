@@ -47,11 +47,13 @@ POLL_INTERVAL = int(os.getenv("CHECK_INTERVAL", "15"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))
 RETRY_COUNT = int(os.getenv("RETRY_COUNT", "3"))
 
-# 日界限（按岁己正常作息界定"一天"：~11:00起 ~03:00睡）
-# 凌晨 0:00 ~ 11:00 算作"前一天"，11:00 及之后才算"今天"
-# 例：夜里刷到凌晨、睡醒 12:00 上线 → 归为"今天"第一次上线；凌晨段全归前一天
-# 可用环境变量 DAY_BOUNDARY_HOUR 调整（如改为 12 表示 0:00~12:00 归前一天）
-DAY_BOUNDARY_HOUR = int(os.getenv("DAY_BOUNDARY_HOUR", "11"))
+# 日界限（按岁己正常作息界定"一天"）
+# 岁己 ~03:00 睡、白天活动（含早起赶飞机 / 睡醒 12:00 起）。
+# 关键：深夜(凌晨 0:00 起)属于"前一天的延续"应归前一天；白天(无论几点起)都算当天。
+# 故取 05:00 为日界：0:00~05:00 归前一天，05:00 及之后算"今天"。
+#   验证：7/9 08:54 早起赶飞机 -> 归 7/9(当天)；7/13 02:30 熬夜 -> 归 7/12(前一天)
+# 可用环境变量 DAY_BOUNDARY_HOUR 微调（如 4 或 6）
+DAY_BOUNDARY_HOUR = int(os.getenv("DAY_BOUNDARY_HOUR", "5"))
 
 # 心跳时间（每日 08:00 发送运行状态）
 HEARTBEAT_HOUR = int(os.getenv("HEARTBEAT_HOUR", "8"))
