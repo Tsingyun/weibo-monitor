@@ -155,6 +155,7 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
     </div>
   </nav>
 
+  <div id="errorPanel" style="display:none;position:sticky;top:0;z-index:999;background:var(--red-d);color:var(--fg);border:1px solid rgba(248,113,113,.5);border-radius:12px;padding:1rem;margin:0 0 1rem;font-size:.85rem;white-space:pre-wrap"></div>
   <section class="hero" id="hero"><div class="skeleton">加载中…</div></section>
 
   <section class="kpis" id="kpis"><div class="skeleton">加载中…</div></section>
@@ -220,8 +221,7 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 </div>
 
 <script src="/static/chart.umd.min.js"></script>
-<script>
-const API='/api/stats';
+<script>const API='/api/stats';
 let DATA=null, CHARTS={}, RANGE=0;
 
 function setRange(r,btn){RANGE=r;
@@ -229,21 +229,21 @@ function setRange(r,btn){RANGE=r;
   if(btn)btn.classList.add('active');
   if(DATA)renderDaily(DATA);}
 const THEME_KEY='sui_webui_theme';
-Chart.defaults.font.family="'Inter','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif";
+
+try{Chart.defaults.font.family="'Inter','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif";}catch(e){console.warn('Chart defaults failed',e);}
+
+function showError(msg){console.error(msg);const el=document.getElementById('errorPanel');if(!el)return;el.textContent+=msg+'\n';el.style.display='block';}
+window.onerror=function(msg,src,ln,col,err){showError('JS错误: '+msg+' (line '+ln+')');};
+window.addEventListener('unhandledrejection',function(e){showError('未处理Promise: '+e.reason);});
 
 function fmtMin(m){if(m==null)return'0';m=Math.round(m);if(m<60)return m+' 分';const h=Math.floor(m/60),r=m%60;return (h>0?(h+' 时'+(r?' '+r+' 分':'')):r+' 分')}
 function themeColors(){const dark=document.documentElement.getAttribute('data-theme')!=='light';
   return{dark,fg:dark?'#E8EEF7':'#0F172A',muted:dark?'#8A97AD':'#5B6880',grid:dark?'rgba(255,255,255,.06)':'rgba(15,23,42,.07)',
   accent:dark?'#3B82F6':'#2563EB',accent2:dark?'#8B5CF6':'#7C3AED',accent3:dark?'#22D3EE':'#0891B2',green:'#34D399'}}
 
-// 注入绿色变量
-Chart.defaults.green='#34D399';
+async function fetchData(){try{const r=await fetch(API);if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}catch(e){showError('获取数据失败: '+e.message);return null}}
 
-function grad(ctx,c1,c2){const isCanvas=typeof ctx.getContext==='function';const canvas=isCanvas?ctx:ctx.canvas;const context=isCanvas?ctx.getContext('2d'):ctx;const g=context.createLinearGradient(0,0,0,canvas.height||300);g.addColorStop(0,c1);g.addColorStop(1,c2);return g}
-
-async function fetchData(){try{const r=await fetch(API);return await r.json()}catch(e){return null}}
-
-function renderHero(d){const on=d.current_status==='online';
+function renderHero(d){try{const on=d.current_status==='online';
   document.getElementById('hero').innerHTML=
   `<div class="ring ${on?'online':'offline'}">${on?'🟢':'⚪'}</div>
    <div class="h-main"><div class="h-label">当前状态</div>
@@ -253,9 +253,10 @@ function renderHero(d){const on=d.current_status==='online';
      <div style="margin-top:.5rem">共 <b>${d.total_events||0}</b> 条记录</div></div>`;
   document.getElementById('ut').textContent='更新 '+ (d.generated_at||'').slice(5);
   var db=(d.day_boundary!=null)?d.day_boundary:8;
-  document.getElementById('footMeta').textContent=String(db).padStart(2,'0')+':00';}
+  document.getElementById('footMeta').textContent=String(db).padStart(2,'0')+':00';
+}catch(e){showError('renderHero: '+e.message);}}
 
-function renderKPIs(d){const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_pct);
+function renderKPIs(d){try{const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_pct);
   document.getElementById('kpis').innerHTML=
   [['今日上线',(t.online_count||0),'次','accent'],
    ['今日在线',fmtMin(t.minutes||0),(t.sessions||0)+' 次会话',''],
@@ -263,11 +264,11 @@ function renderKPIs(d){const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_
    ['活跃天数',(d.total_active_days||0),'天',''],
    ['数据完整度',(cov!=null?cov+'%':'—'),'覆盖率','accent'],
    ['最长在线',fmtMin((d.longest_session&&d.longest_session.duration_minutes)||0),'单次','']
-  ].map(x=>`<div class="kpi"><div class="k-l">${x[0]}</div>
-     <div class="k-v ${x[3]}">${x[1]}</div><div class="k-s">${x[2]}</div></div>`).join('')}
+  ].map(function(x){return '<div class="kpi"><div class="k-l">'+x[0]+'</div><div class="k-v '+x[3]+'">'+x[1]+'</div><div class="k-s">'+x[2]+'</div></div>';}).join('');
+}catch(e){showError('renderKPIs: '+e.message);}}
 
-function renderDaily(d){
-  var full=d.merged_daily||[];if(!full.length)return;
+function renderDaily(d){try{
+  var full=d.merged_daily||[];if(!full.length){document.getElementById('dailySub').textContent='暂无数据';return;}
   var R=(typeof RANGE==='undefined')?0:RANGE;
   var data=R>0?full.slice(-R):full;
   var susp=new Set((d.coverage&&d.coverage.suspicious_days)||[]);
@@ -276,106 +277,101 @@ function renderDaily(d){
   var bg=labels.map(function(_,i){
     if(data[i].missing)return 'rgba(248,113,113,.85)';
     if(susp.has(data[i].date))return 'rgba(251,191,36,.85)';
-    return null;});
+    return themeColors().accent;});
   var c=themeColors();var ctx=document.getElementById('dailyChart');
+  if(!ctx){showError('dailyChart canvas 不存在');return;}
   if(CHARTS.daily)CHARTS.daily.destroy();
   CHARTS.daily=new Chart(ctx,{type:'bar',
-    data:{labels:labels,datasets:[{data:vals,
-      backgroundColor:bg.map(function(b){return b||grad(ctx,c.accent,c.accent3);}),
-      borderRadius:4,maxBarThickness:26}]},
+    data:{labels:labels,datasets:[{data:vals,backgroundColor:bg,borderRadius:4,maxBarThickness:26}]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:function(ctx){var x=data[ctx.dataIndex];
-          var note=x.missing?' · 缺失(未统计到)':(susp.has(x.date)?' · 疑似不完整':'');
-          return (x.count==null?0:x.count)+' 次上线'+note;}}}},
-      scales:{x:{ticks:{color:c.muted,font:{family:"'JetBrains Mono','PingFang SC','Microsoft YaHei'",size:9},maxTicksLimit:30,autoSkip:true},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:8},grid:{color:c.grid}}}}});
+      plugins:{legend:{display:false}},
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:c.grid}}}}});
   var gapN=data.filter(function(x){return x.missing;}).length;
   document.getElementById('dailySub').textContent=
     labels.length+' 天显示 · 红=未统计('+gapN+') 黄=疑似不完整 · 点上方按钮切换区间';
-}
+}catch(e){showError('renderDaily: '+e.message);}}
 
-function renderTrend(d){
-  var data=d.daily||[];if(!data.length)return;
+function renderTrend(d){try{
+  var data=d.daily||[];if(!data.length){document.getElementById('trendChart').parentNode.innerHTML='<div class="empty-note">暂无数据</div>';return;}
   var labels=data.map(function(x){return x.date.slice(5);});
   var vals=data.map(function(x){return x.minutes||0;});
   var c=themeColors();var ctx=document.getElementById('trendChart');
+  if(!ctx){showError('trendChart canvas 不存在');return;}
   if(CHARTS.trend)CHARTS.trend.destroy();
   CHARTS.trend=new Chart(ctx,{type:'line',
-    data:{labels:labels,datasets:[{data:vals,fill:true,
-      backgroundColor:grad(ctx,'rgba(34,211,238,.28)','rgba(34,211,238,0)'),
-      borderColor:c.accent3,borderWidth:2,tension:.38,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:c.accent3}]},
+    data:{labels:labels,datasets:[{data:vals,fill:true,backgroundColor:'rgba(34,211,238,.28)',borderColor:c.accent3,borderWidth:2,tension:.38,pointRadius:0}]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return fmtMin(c.parsed.y);}}}},
-      scales:{x:{ticks:{color:c.muted,font:{family:"'JetBrains Mono','PingFang SC','Microsoft YaHei'",size:9},maxTicksLimit:14,autoSkip:true},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},callback:function(v){return v+'m';}},grid:{color:c.grid}}}}});
-}
+      plugins:{legend:{display:false}},
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:c.grid}}}}});
+}catch(e){showError('renderTrend: '+e.message);}}
 
-function renderDough(d){const t=d.today||{};const on=Math.round(t.minutes||0);const off=Math.max(0,1440-on);
+function renderDough(d){try{const t=d.today||{};const on=Math.round(t.minutes||0);const off=Math.max(0,1440-on);
   const c=themeColors();const ctx=document.getElementById('doughChart');
+  if(!ctx){showError('doughChart canvas 不存在');return;}
   if(CHARTS.dough)CHARTS.dough.destroy();
   CHARTS.dough=new Chart(ctx,{type:'doughnut',
-    data:{labels:['在线','非在线'],datasets:[{data:[on,off],
-      backgroundColor:[grad(ctx,c.green||'#34D399','#22D3EE'),'rgba(138,151,173,.22)'],
-      borderColor:'transparent',borderWidth:0,hoverOffset:6}]},
-    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+fmtMin(c.parsed)}}}}});
+    data:{labels:['在线','非在线'],datasets:[{data:[on,off],backgroundColor:[c.green,'rgba(138,151,173,.22)'],borderColor:'transparent',borderWidth:0,hoverOffset:6}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false}}}});
   const pct=off>0?Math.round(on/1440*100):0;
-  document.getElementById('doughSub').textContent=pct+'% / 今日'}
-function renderHour(d){
-  var h=d.hourly_distribution||[];if(!h.length)return;
+  document.getElementById('doughSub').textContent=pct+'% / 今日';
+}catch(e){showError('renderDough: '+e.message);}}
+
+function renderHour(d){try{
+  var h=d.hourly_distribution||[];if(!h.length){document.getElementById('hourChart').parentNode.innerHTML='<div class="empty-note">暂无数据</div>';return;}
   var labels=h.map(function(x){return String(x.hour).padStart(2,'0');});
   var vals=h.map(function(x){return x.count;});
   var c=themeColors();var ctx=document.getElementById('hourChart');
+  if(!ctx){showError('hourChart canvas 不存在');return;}
   if(CHARTS.hour)CHARTS.hour.destroy();
   CHARTS.hour=new Chart(ctx,{type:'bar',
-    data:{labels:labels,datasets:[{data:vals,backgroundColor:grad(ctx,c.accent2,c.accent3),borderRadius:4,maxBarThickness:30}]},
+    data:{labels:labels,datasets:[{data:vals,backgroundColor:c.accent2,borderRadius:4,maxBarThickness:30}]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.parsed.y+' 次';}}}},
-      scales:{x:{ticks:{color:c.muted,font:{family:"'JetBrains Mono','PingFang SC','Microsoft YaHei'",size:9}},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:2},grid:{color:c.grid}}}}});
-}
+      plugins:{legend:{display:false}},
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:c.grid}}}}});
+}catch(e){showError('renderHour: '+e.message);}}
 
-function renderHeatmap(d){const cov=d.coverage;const el=document.getElementById('heatmap');
+function renderHeatmap(d){try{const cov=d.coverage;const el=document.getElementById('heatmap');
   if(!cov||cov.error){el.innerHTML='<div class="empty-note">覆盖率数据暂不可用（监控运行后生成）</div>';
     document.getElementById('covBig').textContent='—';return}
   document.getElementById('covBig').textContent=cov.overall_pct+'%';
-  const days=(cov.days||[]).slice(-40).reverse(); // 最近40天
-  el.innerHTML=days.map(day=>{
+  const days=(cov.days||[]).slice(-40).reverse();
+  el.innerHTML=days.map(function(day){
     let cells='';
     for(let h=0;h<24;h++){
       let cls='hc cov';
       if(day.status==='missing'){cls='hc';}
       else if(day.status==='partial'){
-        // 根据 missing_ranges 判断该小时覆盖情况
-        const cov_h=!day.missing_ranges.some(r=>{const s=r[0],e=r[1];return h*60>=s&&h*60<e;});
-        const part=day.missing_ranges.some(r=>{const s=r[0],e=r[1];return h*60<s&&e>h*60&&e>s&&h*60<e;});
+        const cov_h=!day.missing_ranges.some(function(r){const s=r[0],e=r[1];return h*60>=s&&h*60<e;});
+        const part=day.missing_ranges.some(function(r){const s=r[0],e=r[1];return h*60<s&&e>h*60&&e>s&&h*60<e;});
         cls=cov_h?'hc cov':(part?'hc part':'hc');
       }
-      cells+=`<div class="${cls}" title="${day.date} ${String(h).padStart(2,'0')}:00"></div>`;
+      cells+='<div class="'+cls+'" title="'+day.date+' '+String(h).padStart(2,'0')+':00"></div>';
     }
-    return `<div class="heat-row"><div class="hd">${day.date.slice(5)}</div><div class="heat-cells">${cells}</div></div>`;
-  }).join('')}
+    return '<div class="heat-row"><div class="hd">'+day.date.slice(5)+'</div><div class="heat-cells">'+cells+'</div></div>';
+  }).join('')
+}catch(e){showError('renderHeatmap: '+e.message);}}
 
-function renderMissing(d){const cov=d.coverage;const el=document.getElementById('missingList');
+function renderMissing(d){try{const cov=d.coverage;const el=document.getElementById('missingList');
   if(!cov||cov.error){el.innerHTML='';return}
   let html='';
-  (cov.missing_spans||[]).forEach(s=>{
+  (cov.missing_spans||[]).forEach(function(s){
     const txt=(s[0]===s[1])?s[0]:(s[0]+' → '+s[1]);
-    html+=`<div class="miss-item"><span class="ic">⛔</span><span>全天缺失：<b>${txt}</b></span></div>`});
-  (cov.suspicious_days||[]).forEach(s=>{
-    html+=`<div class="miss-item warn"><span class="ic">⚠️</span><span>疑似不完整（事件过少）：<b>${s}</b></span></div>`});
-  const partial=(cov.days||[]).filter(x=>x.status==='partial');
-  partial.forEach(x=>{const rs=(x.missing_ranges||[]).map(r=>`${String(Math.floor(r[0]/60)).padStart(2,'0')}:${String(r[0]%60).padStart(2,'0')}-${String(Math.floor(r[1]/60)).padStart(2,'0')}:${String(r[1]%60).padStart(2,'0')}`);
-    if(rs.length)html+=`<div class="miss-item warn"><span class="ic">🕳️</span><span>部分缺失 <b>${x.date}</b>：${rs.join('，')}</span></div>`});
-  el.innerHTML=html||'<div class="empty-note">✅ 未发现数据缺失，监控覆盖完整</div>'}
+    html+='<div class="miss-item"><span class="ic">⛔</span><span>全天缺失：<b>'+txt+'</b></span></div>'});
+  (cov.suspicious_days||[]).forEach(function(s){
+    html+='<div class="miss-item warn"><span class="ic">⚠️</span><span>疑似不完整（事件过少）：<b>'+s+'</b></span></div>'});
+  const partial=(cov.days||[]).filter(function(x){return x.status==='partial';});
+  partial.forEach(function(x){const rs=(x.missing_ranges||[]).map(function(r){return String(Math.floor(r[0]/60)).padStart(2,'0')+':'+String(r[0]%60).padStart(2,'0')+'-'+String(Math.floor(r[1]/60)).padStart(2,'0')+':'+String(r[1]%60).padStart(2,'0');});
+    if(rs.length)html+='<div class="miss-item warn"><span class="ic">🕳️</span><span>部分缺失 <b>'+x.date+'</b>：'+rs.join('，')+'</span></div>'});
+  el.innerHTML=html||'<div class="empty-note">✅ 未发现数据缺失，监控覆盖完整</div>'
+}catch(e){showError('renderMissing: '+e.message);}}
 
-function renderLogs(d){const l=(d.recent_logs||[]).slice().reverse();const el=document.getElementById('logs');
+function renderLogs(d){try{const l=(d.recent_logs||[]).slice().reverse();const el=document.getElementById('logs');
   document.getElementById('logSub').textContent=(d.recent_logs||[]).length+' 条';
   if(!l.length){el.innerHTML='<div class="empty-note">暂无记录</div>';return}
-  el.innerHTML=`<table><thead><tr><th>时间</th><th>状态</th><th>详情</th></tr></thead><tbody>
-    ${l.map(x=>`<tr><td>${x.time}</td><td><span class="s-badge ${x.status}">${x.status==='online'?'🟢 上线':'🔴 下线'}</span></td><td>${x.desc1||''}</td></tr>`).join('')}
-  </tbody></table>`}
+  el.innerHTML='<table><thead><tr><th>时间</th><th>状态</th><th>详情</th></tr></thead><tbody>'+
+    l.map(function(x){return '<tr><td>'+x.time+'</td><td><span class="s-badge '+x.status+'">'+(x.status==='online'?'🟢 上线':'🔴 下线')+'</span></td><td>'+(x.desc1||'')+'</td></tr>';}).join('')+
+  '</tbody></table>'
+}catch(e){showError('renderLogs: '+e.message);}}
 
 function renderAll(d){DATA=d;renderHero(d);renderKPIs(d);renderDaily(d);renderTrend(d);renderDough(d);
   renderHour(d);renderHeatmap(d);renderMissing(d);renderLogs(d)}
@@ -384,10 +380,10 @@ function applyTheme(t){document.documentElement.setAttribute('data-theme',t);
   document.getElementById('themeBtn').textContent=t==='light'?'☀️':'🌙';
   localStorage.setItem(THEME_KEY,t)}
 
-async function refresh(){const d=await fetchData();if(!d||d.empty){return}
+async function refresh(){const d=await fetchData();if(!d||d.empty){showError('API 返回空/无效');return}
   if(!DATA)renderAll(d);else renderAll(d)}
 
-document.getElementById('themeBtn').addEventListener('click',()=>{
+document.getElementById('themeBtn').addEventListener('click',function(){
   const cur=document.documentElement.getAttribute('data-theme');
   const next=cur==='light'?'dark':'light';applyTheme(next);if(DATA)renderAll(DATA)});
 
