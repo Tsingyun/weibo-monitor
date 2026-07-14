@@ -49,9 +49,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microso
 .app{max-width:1180px;margin:0 auto;padding:1.4rem 1.4rem 3rem}
 /* 顶栏 */
 .topnav{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 0 .4rem;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:.7rem}
-.brand .logo{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;font-size:1.3rem;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 22px -8px var(--accent)}
+.brand{display:flex;align-items:center}
 .brand h1{font-family:'Calistoga','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif;font-size:1.5rem;font-weight:400;letter-spacing:-.01em;line-height:1}
 .brand p{font-size:.72rem;color:var(--muted);margin-top:2px;letter-spacing:.04em}
 .nav-right{display:flex;align-items:center;gap:.6rem}
@@ -148,7 +146,6 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 <div class="app">
   <nav class="topnav">
     <div class="brand">
-      <div class="logo">🐰</div>
       <div><h1>岁己<span class="gradient-text">SUI</span></h1><p>微博超话在线监控 · WebUI</p></div>
     </div>
     <div class="nav-right">
