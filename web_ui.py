@@ -222,7 +222,7 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
   </footer>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/chart.umd.min.js"></script>
 <script>
 const API='/api/stats';
 let DATA=null, CHARTS={}, RANGE=0;
