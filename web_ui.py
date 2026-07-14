@@ -40,7 +40,7 @@ PAGE = r"""<!DOCTYPE html>
 --grid:rgba(15,23,42,0.07);--shadow:0 18px 40px -22px rgba(15,23,42,0.25)}
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%}
-body{font-family:'Inter',system-ui,sans-serif;background:
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC','Segoe UI',system-ui,sans-serif;background:
   radial-gradient(1200px 600px at 12% -8%,rgba(59,130,246,0.16),transparent 60%),
   radial-gradient(1000px 540px at 100% 0%,rgba(139,92,246,0.14),transparent 55%),
   var(--bg);color:var(--fg);min-height:100vh;line-height:1.6;-webkit-font-smoothing:antialiased;
@@ -52,11 +52,11 @@ body{font-family:'Inter',system-ui,sans-serif;background:
 .brand{display:flex;align-items:center;gap:.7rem}
 .brand .logo{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;font-size:1.3rem;
   background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 22px -8px var(--accent)}
-.brand h1{font-family:'Calistoga',serif;font-size:1.5rem;font-weight:400;letter-spacing:-.01em;line-height:1}
+.brand h1{font-family:'Calistoga','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif;font-size:1.5rem;font-weight:400;letter-spacing:-.01em;line-height:1}
 .brand p{font-size:.72rem;color:var(--muted);margin-top:2px;letter-spacing:.04em}
 .nav-right{display:flex;align-items:center;gap:.6rem}
 .pill{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .85rem;border-radius:999px;
-  font-family:'JetBrains Mono',monospace;font-size:.7rem;letter-spacing:.08em;border:1px solid var(--card-bd);
+  font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.7rem;letter-spacing:.08em;border:1px solid var(--card-bd);
   background:var(--card);color:var(--muted);backdrop-filter:blur(12px)}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-d);animation:pulse 2.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -74,20 +74,20 @@ body{font-family:'Inter',system-ui,sans-serif;background:
 .hero .ring.offline::after{border-top-color:var(--muted2)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .hero .h-main{flex:1;min-width:200px}
-.hero .h-label{font-family:'JetBrains Mono',monospace;font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.hero .h-label{font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
 .hero .h-status{font-size:2rem;font-weight:700;margin:.15rem 0}
 .hero .h-status.online{color:var(--green)}.hero .h-status.offline{color:var(--muted)}
 .hero .h-desc{font-size:.92rem;color:var(--muted)}
 .hero .h-meta{text-align:right;font-size:.82rem;color:var(--muted);min-width:150px}
-.hero .h-meta b{color:var(--fg);font-family:'JetBrains Mono',monospace;font-weight:500}
+.hero .h-meta b{color:var(--fg);font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:500}
 /* KPI */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1rem;margin-bottom:1.4rem}
 .kpi{padding:1.2rem 1.3rem;border-radius:var(--radius-sm);border:1px solid var(--card-bd);background:var(--card);
   backdrop-filter:blur(14px);box-shadow:var(--shadow);transition:.28s;position:relative;overflow:hidden}
 .kpi:hover{transform:translateY(-3px);background:var(--card-hi)}
 .kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(var(--accent),var(--accent2))}
-.kpi .k-l{font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-.kpi .k-v{font-family:'Calistoga',serif;font-size:1.85rem;line-height:1.1;margin:.35rem 0 .1rem}
+.kpi .k-l{font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.kpi .k-v{font-family:'Calistoga','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif;font-size:1.85rem;line-height:1.1;margin:.35rem 0 .1rem}
 .kpi .k-v.accent{background:linear-gradient(120deg,var(--accent),var(--accent3));-webkit-background-clip:text;background-clip:text;color:transparent}
 .kpi .k-s{font-size:.74rem;color:var(--muted)}
 /* 图表栅格 */
@@ -96,42 +96,42 @@ body{font-family:'Inter',system-ui,sans-serif;background:
   backdrop-filter:blur(14px);box-shadow:var(--shadow);margin-bottom:1rem}
 .card.span2{grid-column:1/-1}
 .card .c-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;gap:.6rem;flex-wrap:wrap}
-.card .c-title{font-family:'Calistoga',serif;font-size:1.12rem;font-weight:400}
-.card .c-sub{font-size:.72rem;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.card .c-title{font-family:'Calistoga','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif;font-size:1.12rem;font-weight:400}
+.card .c-sub{font-size:.72rem;color:var(--muted);font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .chart-box{position:relative;height:230px}
 .chart-box.tall{height:300px}
 .legend{display:flex;gap:1.1rem;flex-wrap:wrap;margin-top:.7rem;font-size:.72rem;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:.35rem;vertical-align:middle}
 .range-btns{display:inline-flex;gap:2px;background:var(--card);border:1px solid var(--card-bd);border-radius:10px;padding:3px}
-.range-btns button{font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.04em;color:var(--muted);
+.range-btns button{font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.66rem;letter-spacing:.04em;color:var(--muted);
   background:transparent;border:none;padding:.3rem .55rem;border-radius:7px;cursor:pointer;transition:.2s}
 .range-btns button:hover{color:var(--fg);background:var(--card-hi)}
 .range-btns button.active{color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent2));box-shadow:0 4px 12px -4px var(--accent)}
 /* 覆盖率热力图 */
 .cov-summary{display:flex;align-items:center;gap:1.3rem;flex-wrap:wrap;margin-bottom:1rem}
-.cov-big{font-family:'Calistoga',serif;font-size:2.4rem;line-height:1;
+.cov-big{font-family:'Calistoga','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif;font-size:2.4rem;line-height:1;
   background:linear-gradient(120deg,var(--green),var(--accent3));-webkit-background-clip:text;background-clip:text;color:transparent}
 .heatmap{overflow-x:auto;padding-bottom:.4rem}
 .heat-row{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:.6rem;margin-bottom:3px}
-.heat-row .hd{font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--muted);text-align:right;white-space:nowrap}
+.heat-row .hd{font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.62rem;color:var(--muted);text-align:right;white-space:nowrap}
 .heat-cells{display:grid;grid-template-columns:repeat(24,1fr);gap:2px}
 .heat-cells .hc{height:15px;border-radius:3px;background:var(--red-d);transition:.2s;cursor:default}
 .heat-cells .hc.cov{background:linear-gradient(135deg,var(--accent),var(--accent3))}
 .heat-cells .hc.part{background:linear-gradient(135deg,var(--amber),#F59E0B)}
 .heat-cells .hc:hover{outline:1.5px solid #fff;outline-offset:1px}
 .heat-axis{display:grid;grid-template-columns:64px 1fr;gap:.6rem;margin-top:.4rem}
-.heat-axis .ticks{display:grid;grid-template-columns:repeat(12,1fr);font-family:'JetBrains Mono',monospace;font-size:.56rem;color:var(--muted2)}
+.heat-axis .ticks{display:grid;grid-template-columns:repeat(12,1fr);font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.56rem;color:var(--muted2)}
 .missing-list{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
 .miss-item{display:flex;align-items:center;gap:.7rem;padding:.7rem .9rem;border-radius:12px;background:var(--red-d);
   border:1px solid rgba(248,113,113,.25);font-size:.85rem}
 .miss-item .ic{font-size:1.05rem}
 .miss-item.warn{background:var(--amber-d);border-color:rgba(251,191,36,.25)}
-.miss-item b{font-family:'JetBrains Mono',monospace;color:var(--fg)}
+.miss-item b{font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--fg)}
 .empty-note{color:var(--muted);font-size:.85rem;padding:.6rem 0}
 /* 日志表 */
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.85rem}
-thead th{text-align:left;padding:.6rem .8rem;font-family:'JetBrains Mono',monospace;font-size:.64rem;letter-spacing:.1em;
+thead th{text-align:left;padding:.6rem .8rem;font-family:'JetBrains Mono','PingFang SC','Microsoft YaHei',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.64rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--card-bd)}
 tbody td{padding:.6rem .8rem;border-bottom:1px solid var(--grid)}
 tbody tr:hover{background:var(--card-hi)}
@@ -232,6 +232,7 @@ function setRange(r,btn){RANGE=r;
   if(btn)btn.classList.add('active');
   if(DATA)renderDaily(DATA);}
 const THEME_KEY='sui_webui_theme';
+Chart.defaults.font.family="'Inter','PingFang SC','Microsoft YaHei','Source Han Sans SC','Noto Sans SC',system-ui,sans-serif";
 
 function fmtMin(m){if(m==null)return'0';m=Math.round(m);if(m<60)return m+' 分';const h=Math.floor(m/60),r=m%60;return (h>0?(h+' 时'+(r?' '+r+' 分':'')):r+' 分')}
 function themeColors(){const dark=document.documentElement.getAttribute('data-theme')!=='light';
@@ -287,7 +288,7 @@ function renderDaily(d){
         tooltip:{callbacks:{label:function(ctx){var x=data[ctx.dataIndex];
           var note=x.missing?' · 缺失(未统计到)':(susp.has(x.date)?' · 疑似不完整':'');
           return (x.count==null?0:x.count)+' 次上线'+note;}}}},
-      scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9},maxTicksLimit:30,autoSkip:true},grid:{display:false}},
+      scales:{x:{ticks:{color:c.muted,font:{family:"'JetBrains Mono','PingFang SC','Microsoft YaHei'",size:9},maxTicksLimit:30,autoSkip:true},grid:{display:false}},
         y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:8},grid:{color:c.grid}}}}});
   var gapN=data.filter(function(x){return x.missing;}).length;
   document.getElementById('dailySub').textContent=
@@ -306,7 +307,7 @@ function renderTrend(d){
       borderColor:c.accent3,borderWidth:2,tension:.38,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:c.accent3}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return fmtMin(c.parsed.y);}}}},
-      scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9},maxTicksLimit:14,autoSkip:true},grid:{display:false}},
+      scales:{x:{ticks:{color:c.muted,font:{family:"'JetBrains Mono','PingFang SC','Microsoft YaHei'",size:9},maxTicksLimit:14,autoSkip:true},grid:{display:false}},
         y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},callback:function(v){return v+'m';}},grid:{color:c.grid}}}}});
 }
 
@@ -334,7 +335,7 @@ function renderHour(d){
     data:{labels:labels,datasets:[{data:vals,backgroundColor:grad(ctx,c.accent2,c.accent3),borderRadius:4,maxBarThickness:30}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.parsed.y+' 次';}}}},
-      scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9}},grid:{display:false}},
+      scales:{x:{ticks:{color:c.muted,font:{family:"'JetBrains Mono','PingFang SC','Microsoft YaHei'",size:9}},grid:{display:false}},
         y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:2},grid:{color:c.grid}}}}});
 }
 
