@@ -102,10 +102,11 @@ body{font-family:'Inter',system-ui,sans-serif;background:
 .chart-box.tall{height:300px}
 .legend{display:flex;gap:1.1rem;flex-wrap:wrap;margin-top:.7rem;font-size:.72rem;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:.35rem;vertical-align:middle}
-.range-btns{display:flex;gap:.35rem}
-.range-btns button{font-family:'JetBrains Mono',monospace;font-size:.64rem;letter-spacing:.04em;padding:.3rem .6rem;border-radius:9px;cursor:pointer;border:1px solid var(--card-bd);background:var(--card);color:var(--muted);transition:.2s}
+.range-btns{display:inline-flex;gap:2px;background:var(--card);border:1px solid var(--card-bd);border-radius:10px;padding:3px}
+.range-btns button{font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.04em;color:var(--muted);
+  background:transparent;border:none;padding:.3rem .55rem;border-radius:7px;cursor:pointer;transition:.2s}
 .range-btns button:hover{color:var(--fg);background:var(--card-hi)}
-.range-btns button.active{color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent}
+.range-btns button.active{color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent2));box-shadow:0 4px 12px -4px var(--accent)}
 /* 覆盖率热力图 */
 .cov-summary{display:flex;align-items:center;gap:1.3rem;flex-wrap:wrap;margin-bottom:1rem}
 .cov-big{font-family:'Calistoga',serif;font-size:2.4rem;line-height:1;
@@ -163,22 +164,20 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 
   <div class="grid">
     <div class="card span2">
-      <div class="c-head">
-        <div class="c-title">每日上线次数 · 上线趋势</div>
-        <div class="range-btns" id="rangeBtns">
-          <button data-r="30">30天</button>
-          <button data-r="60">60天</button>
-          <button data-r="90">90天</button>
-          <button data-r="0" class="active">全部</button>
-        </div>
-      </div>
+      <div class="c-head"><div class="c-title">每日上线次数</div>
+        <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+          <div class="c-sub" id="dailySub" style="margin-right:.3rem"></div>
+          <div class="range-btns" id="rangeBtns">
+            <button data-r="30">30天</button><button data-r="60">60天</button>
+            <button data-r="90">90天</button><button data-r="0" class="active">全部</button>
+          </div>
+        </div></div>
       <div class="chart-box tall"><canvas id="dailyChart"></canvas></div>
       <div class="legend">
         <span><i style="background:linear-gradient(135deg,var(--accent),var(--accent3))"></i>正常数据</span>
         <span><i style="background:var(--amber)"></i>疑似不完整</span>
-        <span><i style="background:var(--red)"></i>缺失(未统计)</span>
+        <span><i style="background:var(--red)"></i>整日缺失</span>
       </div>
-      <div class="c-sub" id="dailySub" style="margin-top:.6rem"></div>
     </div>
     <div class="card">
       <div class="c-head"><div class="c-title">在线时长趋势</div><div class="c-sub">分钟 / 天</div></div>
@@ -219,7 +218,7 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 
   <footer>
     <div><span class="refresh-dot"></span>每 30 秒自动刷新 · 数据本地存储</div>
-    <div id="footMeta">日界限 凌晨 --:00 · 监控间隔 15s</div>
+    <div>日界限 凌晨 <span id="footMeta">--</span> · 监控间隔 15s</div>
   </footer>
 </div>
 
@@ -227,6 +226,11 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 <script>
 const API='/api/stats';
 let DATA=null, CHARTS={}, RANGE=0;
+
+function setRange(r,btn){RANGE=r;
+  document.querySelectorAll('#rangeBtns button').forEach(function(b){b.classList.remove('active');});
+  if(btn)btn.classList.add('active');
+  if(DATA)renderDaily(DATA);}
 const THEME_KEY='sui_webui_theme';
 
 function fmtMin(m){if(m==null)return'0';m=Math.round(m);if(m<60)return m+' 分';const h=Math.floor(m/60),r=m%60;return (h>0?(h+' 时'+(r?' '+r+' 分':'')):r+' 分')}
@@ -247,7 +251,8 @@ function renderHero(d){const on=d.current_status==='online';
    <div class="h-meta"><div class="h-label">最后事件</div><b>${d.last_event_time||'暂无'}</b>
      <div style="margin-top:.5rem">共 <b>${d.total_events||0}</b> 条记录</div></div>`;
   document.getElementById('ut').textContent='更新 '+ (d.generated_at||'').slice(5);
-  document.getElementById('footMeta').textContent='日界限 凌晨 '+ (d.day_boundary||5) +':00 · 监控间隔 '+ (d.poll_interval||15) +'s'}
+  var db=(d.day_boundary!=null)?d.day_boundary:8;
+  document.getElementById('footMeta').textContent=String(db).padStart(2,'0')+':00';}
 
 function renderKPIs(d){const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_pct);
   document.getElementById('kpis').innerHTML=
@@ -261,46 +266,49 @@ function renderKPIs(d){const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_
      <div class="k-v ${x[3]}">${x[1]}</div><div class="k-s">${x[2]}</div></div>`).join('')}
 
 function renderDaily(d){
-  const full=d.merged_daily||[];if(!full.length)return;
-  const R=(typeof RANGE==='undefined')?0:RANGE;       // 0=全部
-  const data=R>0?full.slice(-R):full;
-  const susp=new Set((d.coverage&&d.coverage.suspicious_days)||[]);
-  const labels=data.map(x=>x.date.slice(5));
-  const vals=data.map(x=>x.count==null?0:x.count);
-  const bg=labels.map((_,i)=>{
+  var full=d.merged_daily||[];if(!full.length)return;
+  var R=(typeof RANGE==='undefined')?0:RANGE;
+  var data=R>0?full.slice(-R):full;
+  var susp=new Set((d.coverage&&d.coverage.suspicious_days)||[]);
+  var labels=data.map(function(x){return x.date.slice(5);});
+  var vals=data.map(function(x){return x.count==null?0:x.count;});
+  var bg=labels.map(function(_,i){
     if(data[i].missing)return 'rgba(248,113,113,.85)';
     if(susp.has(data[i].date))return 'rgba(251,191,36,.85)';
     return null;});
-  const c=themeColors();const ctx=document.getElementById('dailyChart');
+  var c=themeColors();var ctx=document.getElementById('dailyChart');
   if(CHARTS.daily)CHARTS.daily.destroy();
   CHARTS.daily=new Chart(ctx,{type:'bar',
-    data:{labels,datasets:[{data:vals,
-      backgroundColor:bg.map(b=>b||grad(ctx,c.accent,c.accent3)),
+    data:{labels:labels,datasets:[{data:vals,
+      backgroundColor:bg.map(function(b){return b||grad(ctx,c.accent,c.accent3);}),
       borderRadius:4,maxBarThickness:26}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>{const x=data[ctx.dataIndex];
-          const note=x.missing?' · 缺失(未统计到)':(susp.has(x.date)?' · 疑似不完整':'');
+        tooltip:{callbacks:{label:function(ctx){var x=data[ctx.dataIndex];
+          var note=x.missing?' · 缺失(未统计到)':(susp.has(x.date)?' · 疑似不完整':'');
           return (x.count==null?0:x.count)+' 次上线'+note;}}}},
       scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9},maxTicksLimit:30,autoSkip:true},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:8},grid:{color:c.grid}}}}}});
-  const gapN=data.filter(x=>x.missing).length;
+        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:8},grid:{color:c.grid}}}}});
+  var gapN=data.filter(function(x){return x.missing;}).length;
   document.getElementById('dailySub').textContent=
-    `${labels.length} 天显示 · 红=未统计(${gapN}) 黄=疑似不完整 · 点上方按钮切换区间`;
+    labels.length+' 天显示 · 红=未统计('+gapN+') 黄=疑似不完整 · 点上方按钮切换区间';
 }
 
-function renderTrend(d){const data=d.daily||[];if(!data.length)return;
-  const labels=data.map(x=>x.date.slice(5)),vals=data.map(x=>x.minutes||0);
-  const c=themeColors();const ctx=document.getElementById('trendChart');
+function renderTrend(d){
+  var data=d.daily||[];if(!data.length)return;
+  var labels=data.map(function(x){return x.date.slice(5);});
+  var vals=data.map(function(x){return x.minutes||0;});
+  var c=themeColors();var ctx=document.getElementById('trendChart');
   if(CHARTS.trend)CHARTS.trend.destroy();
   CHARTS.trend=new Chart(ctx,{type:'line',
-    data:{labels,datasets:[{data:vals,fill:true,
+    data:{labels:labels,datasets:[{data:vals,fill:true,
       backgroundColor:grad(ctx,'rgba(34,211,238,.28)','rgba(34,211,238,0)'),
       borderColor:c.accent3,borderWidth:2,tension:.38,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:c.accent3}]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtMin(c.parsed.y)}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return fmtMin(c.parsed.y);}}}},
       scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9},maxTicksLimit:14,autoSkip:true},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},callback:v=>v+'m'},grid:{color:c.grid}}}}}})
+        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},callback:function(v){return v+'m';}},grid:{color:c.grid}}}}});
+}
 
 function renderDough(d){const t=d.today||{};const on=Math.round(t.minutes||0);const off=Math.max(0,1440-on);
   const c=themeColors();const ctx=document.getElementById('doughChart');
@@ -316,16 +324,19 @@ function renderDough(d){const t=d.today||{};const on=Math.round(t.minutes||0);co
 // 注入 green 变量
 Chart.defaults.green='#34D399';
 
-function renderHour(d){const h=d.hourly_distribution||[];if(!h.length)return;
-  const labels=h.map(x=>String(x.hour).padStart(2,'0')),vals=h.map(x=>x.count);
-  const c=themeColors();const ctx=document.getElementById('hourChart');
+function renderHour(d){
+  var h=d.hourly_distribution||[];if(!h.length)return;
+  var labels=h.map(function(x){return String(x.hour).padStart(2,'0');});
+  var vals=h.map(function(x){return x.count;});
+  var c=themeColors();var ctx=document.getElementById('hourChart');
   if(CHARTS.hour)CHARTS.hour.destroy();
   CHARTS.hour=new Chart(ctx,{type:'bar',
-    data:{labels,datasets:[{data:vals,backgroundColor:grad(ctx,c.accent2,c.accent3),borderRadius:4,maxBarThickness:30}]},
+    data:{labels:labels,datasets:[{data:vals,backgroundColor:grad(ctx,c.accent2,c.accent3),borderRadius:4,maxBarThickness:30}]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y+' 次'}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.parsed.y+' 次';}}}},
       scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9}},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:2},grid:{color:c.grid}}}}}})
+        y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:2},grid:{color:c.grid}}}}});
+}
 
 function renderHeatmap(d){const cov=d.coverage;const el=document.getElementById('heatmap');
   if(!cov||cov.error){el.innerHTML='<div class="empty-note">覆盖率数据暂不可用（监控运行后生成）</div>';
@@ -371,11 +382,6 @@ function renderLogs(d){const l=(d.recent_logs||[]).slice().reverse();const el=do
 function renderAll(d){DATA=d;renderHero(d);renderKPIs(d);renderDaily(d);renderTrend(d);renderDough(d);
   renderHour(d);renderHeatmap(d);renderMissing(d);renderLogs(d)}
 
-function setRange(r,btn){RANGE=r;
-  document.querySelectorAll('#rangeBtns button').forEach(b=>b.classList.remove('active'));
-  if(btn)btn.classList.add('active');
-  if(DATA)renderDaily(DATA);}
-
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);
   document.getElementById('themeBtn').textContent=t==='light'?'☀️':'🌙';
   localStorage.setItem(THEME_KEY,t)}
@@ -387,10 +393,8 @@ document.getElementById('themeBtn').addEventListener('click',()=>{
   const cur=document.documentElement.getAttribute('data-theme');
   const next=cur==='light'?'dark':'light';applyTheme(next);if(DATA)renderAll(DATA)});
 
-(function init(){const saved=localStorage.getItem(THEME_KEY)||'dark';applyTheme(saved);
-  document.querySelectorAll('#rangeBtns button').forEach(b=>{
-    b.addEventListener('click',()=>setRange(parseInt(b.dataset.r,10),b));});
-  refresh();setInterval(refresh,30000)})();
+(function init(){const saved=localStorage.getItem(THEME_KEY)||'dark';applyTheme(saved);refresh();setInterval(refresh,30000);
+  document.querySelectorAll('#rangeBtns button').forEach(function(b){b.addEventListener('click',function(){setRange(parseInt(b.dataset.r,10),b);});})})();
 </script>
 </body></html>"""
 
