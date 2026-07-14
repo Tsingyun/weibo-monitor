@@ -234,9 +234,12 @@ Chart.defaults.font.family="'Inter','PingFang SC','Microsoft YaHei','Source Han 
 function fmtMin(m){if(m==null)return'0';m=Math.round(m);if(m<60)return m+' 分';const h=Math.floor(m/60),r=m%60;return (h>0?(h+' 时'+(r?' '+r+' 分':'')):r+' 分')}
 function themeColors(){const dark=document.documentElement.getAttribute('data-theme')!=='light';
   return{dark,fg:dark?'#E8EEF7':'#0F172A',muted:dark?'#8A97AD':'#5B6880',grid:dark?'rgba(255,255,255,.06)':'rgba(15,23,42,.07)',
-  accent:dark?'#3B82F6':'#2563EB',accent2:dark?'#8B5CF6':'#7C3AED',accent3:dark?'#22D3EE':'#0891B2'}}
+  accent:dark?'#3B82F6':'#2563EB',accent2:dark?'#8B5CF6':'#7C3AED',accent3:dark?'#22D3EE':'#0891B2',green:'#34D399'}}
 
-function grad(ctx,c1,c2){const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height||300);g.addColorStop(0,c1);g.addColorStop(1,c2);return g}
+// 注入绿色变量
+Chart.defaults.green='#34D399';
+
+function grad(ctx,c1,c2){const isCanvas=typeof ctx.getContext==='function';const canvas=isCanvas?ctx:ctx.canvas;const context=isCanvas?ctx.getContext('2d'):ctx;const g=context.createLinearGradient(0,0,0,canvas.height||300);g.addColorStop(0,c1);g.addColorStop(1,c2);return g}
 
 async function fetchData(){try{const r=await fetch(API);return await r.json()}catch(e){return null}}
 
@@ -319,9 +322,6 @@ function renderDough(d){const t=d.today||{};const on=Math.round(t.minutes||0);co
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+fmtMin(c.parsed)}}}}});
   const pct=off>0?Math.round(on/1440*100):0;
   document.getElementById('doughSub').textContent=pct+'% / 今日'}
-// 注入 green 变量
-Chart.defaults.green='#34D399';
-
 function renderHour(d){
   var h=d.hourly_distribution||[];if(!h.length)return;
   var labels=h.map(function(x){return String(x.hour).padStart(2,'0');});
