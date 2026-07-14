@@ -118,15 +118,42 @@ class Monitor:
         if sessions:
             stats["longest_session"] = max(sessions, key=lambda s: s["duration_minutes"])
 
-        # 合并历史数据
+        # 合并历史数据 → 连续化序列，明确标记「因故未统计」的缺口
         history = read_json(HISTORY_PATH, [])
+        cov = read_json(COVERAGE_PATH, {})
         merged = {}
+        source = {}
         for h in history:
-            merged[h["date"]] = h["count"]
+            merged[h["date"]] = h.get("count")
+            source[h["date"]] = "history"   # 2025 年归档（来自历史整合）
         for d in daily_list:
-            if d["date"] not in merged:
-                merged[d["date"]] = d["online_count"]
-        stats["merged_daily"] = [{"date": d, "count": merged[d]} for d in sorted(merged)]
+            merged[d["date"]] = d["online_count"]
+            source[d["date"]] = "current"   # 当前监控期（events.json 实时计算）
+        if merged:
+            start = min(merged)
+            end = now.strftime("%Y-%m-%d")
+            cur = datetime.strptime(start, "%Y-%m-%d")
+            end_d = datetime.strptime(end, "%Y-%m-%d")
+            seq = []
+            while cur <= end_d:
+                ds = cur.strftime("%Y-%m-%d")
+                has_data = ds in source                 # history 或 current 有记录
+                has_cov = ds in cov and bool(cov[ds])   # 监控在跑（coverage 文件有记录）
+                if has_data:
+                    # 历史归档或当前监控期，按实计数
+                    seq.append({"date": ds, "count": merged[ds], "missing": False, "source": source[ds]})
+                elif has_cov:
+                    # 监控在跑但当天 0 次上线（已统计，不算缺口）
+                    seq.append({"date": ds, "count": 0, "missing": False, "source": "monitored"})
+                else:
+                    # 区间内但完全无数据 → 缺口（未监控 / 数据缺失）
+                    seq.append({"date": ds, "count": None, "missing": True, "source": "gap"})
+                cur += timedelta(days=1)
+            stats["merged_daily"] = seq
+            stats["gap_days"] = [x["date"] for x in seq if x["missing"]]
+        else:
+            stats["merged_daily"] = []
+            stats["gap_days"] = []
 
         return stats
 

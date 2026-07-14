@@ -102,6 +102,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:
 .chart-box.tall{height:300px}
 .legend{display:flex;gap:1.1rem;flex-wrap:wrap;margin-top:.7rem;font-size:.72rem;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:.35rem;vertical-align:middle}
+.range-btns{display:flex;gap:.35rem}
+.range-btns button{font-family:'JetBrains Mono',monospace;font-size:.64rem;letter-spacing:.04em;padding:.3rem .6rem;border-radius:9px;cursor:pointer;border:1px solid var(--card-bd);background:var(--card);color:var(--muted);transition:.2s}
+.range-btns button:hover{color:var(--fg);background:var(--card-hi)}
+.range-btns button.active{color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent}
 /* 覆盖率热力图 */
 .cov-summary{display:flex;align-items:center;gap:1.3rem;flex-wrap:wrap;margin-bottom:1rem}
 .cov-big{font-family:'Calistoga',serif;font-size:2.4rem;line-height:1;
@@ -159,14 +163,22 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 
   <div class="grid">
     <div class="card span2">
-      <div class="c-head"><div class="c-title">每日上线次数</div>
-        <div class="c-sub" id="dailySub"></div></div>
+      <div class="c-head">
+        <div class="c-title">每日上线次数 · 上线趋势</div>
+        <div class="range-btns" id="rangeBtns">
+          <button data-r="30">30天</button>
+          <button data-r="60">60天</button>
+          <button data-r="90">90天</button>
+          <button data-r="0" class="active">全部</button>
+        </div>
+      </div>
       <div class="chart-box tall"><canvas id="dailyChart"></canvas></div>
       <div class="legend">
         <span><i style="background:linear-gradient(135deg,var(--accent),var(--accent3))"></i>正常数据</span>
         <span><i style="background:var(--amber)"></i>疑似不完整</span>
-        <span><i style="background:var(--red)"></i>整日缺失</span>
+        <span><i style="background:var(--red)"></i>缺失(未统计)</span>
       </div>
+      <div class="c-sub" id="dailySub" style="margin-top:.6rem"></div>
     </div>
     <div class="card">
       <div class="c-head"><div class="c-title">在线时长趋势</div><div class="c-sub">分钟 / 天</div></div>
@@ -207,14 +219,14 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
 
   <footer>
     <div><span class="refresh-dot"></span>每 30 秒自动刷新 · 数据本地存储</div>
-    <div>日界限 凌晨 4:00 · 监控间隔 15s</div>
+    <div id="footMeta">日界限 凌晨 --:00 · 监控间隔 15s</div>
   </footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const API='/api/stats';
-let DATA=null, CHARTS={};
+let DATA=null, CHARTS={}, RANGE=0;
 const THEME_KEY='sui_webui_theme';
 
 function fmtMin(m){if(m==null)return'0';m=Math.round(m);if(m<60)return m+' 分';const h=Math.floor(m/60),r=m%60;return (h>0?(h+' 时'+(r?' '+r+' 分':'')):r+' 分')}
@@ -234,7 +246,8 @@ function renderHero(d){const on=d.current_status==='online';
      <div class="h-desc">${d.current_desc1||'—'}</div></div>
    <div class="h-meta"><div class="h-label">最后事件</div><b>${d.last_event_time||'暂无'}</b>
      <div style="margin-top:.5rem">共 <b>${d.total_events||0}</b> 条记录</div></div>`;
-  document.getElementById('ut').textContent='更新 '+ (d.generated_at||'').slice(5)}
+  document.getElementById('ut').textContent='更新 '+ (d.generated_at||'').slice(5);
+  document.getElementById('footMeta').textContent='日界限 凌晨 '+ (d.day_boundary||5) +':00 · 监控间隔 '+ (d.poll_interval||15) +'s'}
 
 function renderKPIs(d){const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_pct);
   document.getElementById('kpis').innerHTML=
@@ -247,14 +260,16 @@ function renderKPIs(d){const t=d.today||{}, cov=(d.coverage&&d.coverage.overall_
   ].map(x=>`<div class="kpi"><div class="k-l">${x[0]}</div>
      <div class="k-v ${x[3]}">${x[1]}</div><div class="k-s">${x[2]}</div></div>`).join('')}
 
-function renderDaily(d){const cov=d.coverage||{};
-  const missing=new Set(cov.missing_days||[]), susp=new Set(cov.suspicious_days||[]);
-  const data=d.merged_daily||[];if(!data.length)return;
-  const labels=data.map(x=>x.date.slice(5)),vals=data.map(x=>x.count);
-  const bg=labels.map((_,i)=>{const dt='2026-'+data[i].date.slice(5);
-    const full=data[i].date;
-    if(missing.has(full))return 'rgba(248,113,113,.85)';
-    if(susp.has(full))return 'rgba(251,191,36,.85)';
+function renderDaily(d){
+  const full=d.merged_daily||[];if(!full.length)return;
+  const R=(typeof RANGE==='undefined')?0:RANGE;       // 0=全部
+  const data=R>0?full.slice(-R):full;
+  const susp=new Set((d.coverage&&d.coverage.suspicious_days)||[]);
+  const labels=data.map(x=>x.date.slice(5));
+  const vals=data.map(x=>x.count==null?0:x.count);
+  const bg=labels.map((_,i)=>{
+    if(data[i].missing)return 'rgba(248,113,113,.85)';
+    if(susp.has(data[i].date))return 'rgba(251,191,36,.85)';
     return null;});
   const c=themeColors();const ctx=document.getElementById('dailyChart');
   if(CHARTS.daily)CHARTS.daily.destroy();
@@ -264,12 +279,15 @@ function renderDaily(d){const cov=d.coverage||{};
       borderRadius:4,maxBarThickness:26}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>{const dt='2026-'+data[ctx.dataIndex].date.slice(5);
-          const note=missing.has(dt)?' · 整日缺失':(susp.has(dt)?' · 疑似不完整':'');
-          return ctx.parsed.y+' 次上线'+note;}}}},
+        tooltip:{callbacks:{label:ctx=>{const x=data[ctx.dataIndex];
+          const note=x.missing?' · 缺失(未统计到)':(susp.has(x.date)?' · 疑似不完整':'');
+          return (x.count==null?0:x.count)+' 次上线'+note;}}}},
       scales:{x:{ticks:{color:c.muted,font:{family:'JetBrains Mono',size:9},maxTicksLimit:30,autoSkip:true},grid:{display:false}},
         y:{beginAtZero:true,ticks:{color:c.muted,font:{size:10},stepSize:8},grid:{color:c.grid}}}}}});
-  document.getElementById('dailySub').textContent=labels.length+' 天 · 红色为缺失日'}
+  const gapN=data.filter(x=>x.missing).length;
+  document.getElementById('dailySub').textContent=
+    `${labels.length} 天显示 · 红=未统计(${gapN}) 黄=疑似不完整 · 点上方按钮切换区间`;
+}
 
 function renderTrend(d){const data=d.daily||[];if(!data.length)return;
   const labels=data.map(x=>x.date.slice(5)),vals=data.map(x=>x.minutes||0);
@@ -353,6 +371,11 @@ function renderLogs(d){const l=(d.recent_logs||[]).slice().reverse();const el=do
 function renderAll(d){DATA=d;renderHero(d);renderKPIs(d);renderDaily(d);renderTrend(d);renderDough(d);
   renderHour(d);renderHeatmap(d);renderMissing(d);renderLogs(d)}
 
+function setRange(r,btn){RANGE=r;
+  document.querySelectorAll('#rangeBtns button').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  if(DATA)renderDaily(DATA);}
+
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);
   document.getElementById('themeBtn').textContent=t==='light'?'☀️':'🌙';
   localStorage.setItem(THEME_KEY,t)}
@@ -364,7 +387,10 @@ document.getElementById('themeBtn').addEventListener('click',()=>{
   const cur=document.documentElement.getAttribute('data-theme');
   const next=cur==='light'?'dark':'light';applyTheme(next);if(DATA)renderAll(DATA)});
 
-(function init(){const saved=localStorage.getItem(THEME_KEY)||'dark';applyTheme(saved);refresh();setInterval(refresh,30000)})();
+(function init(){const saved=localStorage.getItem(THEME_KEY)||'dark';applyTheme(saved);
+  document.querySelectorAll('#rangeBtns button').forEach(b=>{
+    b.addEventListener('click',()=>setRange(parseInt(b.dataset.r,10),b));});
+  refresh();setInterval(refresh,30000)})();
 </script>
 </body></html>"""
 
@@ -378,6 +404,7 @@ def api_stats():
     from monitor import Monitor
     m = Monitor()  # 仅用于计算统计，不启动监控
     stats = m.compute_stats()
+    stats["day_boundary"] = DAY_BOUNDARY_HOUR
     try:
         stats["coverage"] = m.compute_coverage()
     except Exception as e:
