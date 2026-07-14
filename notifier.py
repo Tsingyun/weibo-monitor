@@ -153,12 +153,15 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
 
 # ===== 聚合发送 =====
 def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None,
-          bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None):
+          bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None, bark_fallback=False):
     """发送消息到所有已启用通道 (Telegram + Bark), 带重试/分段。
-    bark_* 参数仅作用于 Bark 通道 (title/level/sound/icon/subtitle/url/call/volume)。"""
+    bark_* 参数仅作用于 Bark 通道 (title/level/sound/icon/subtitle/url/call/volume)。
+    bark_fallback=True 时, 若 Bark 发送失败, 自动在 Telegram 补发一条 🔴 强调提醒,
+    确保关键告警 (cookie过期/连续失败/监控暂停) 即便只看 Bark 也不会漏接。"""
     if not enabled():
         return False
     ok = True
+    # Telegram 先发 (保证立即送达, 不等待 Bark 超时)
     if tg_enabled():
         chunks = _chunk_message(message)
         if len(chunks) > 1 and log_fn:
@@ -167,17 +170,24 @@ def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None
             text = chunk if len(chunks) == 1 else f"[{i+1}/{len(chunks)}] {chunk}"
             if not _tg_send_one(text, log_fn=log_fn):
                 ok = False
+    # Bark 通道
+    bark_ok = True
     if bark_enabled():
         if not _bark_send_one(message, log_fn=log_fn, title=bark_title, level=bark_level,
                               sound=bark_sound, icon=bark_icon, subtitle=bark_subtitle,
                               url=bark_url, call=bark_call, volume=bark_volume):
+            bark_ok = False
             ok = False
+    # 兜底: 关键告警 Bark 失败时, Telegram 补发强调提醒
+    if bark_fallback and not bark_ok and tg_enabled():
+        _tg_send_one("🔴 Bark 推送失败！上方关键通知仅通过 Telegram 送达，请以 Telegram 为准。",
+                     log_fn=log_fn)
     return ok
 
 def notify(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None,
-           bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None):
+           bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None, bark_fallback=False):
     """统一通知: 控制台 + 所有已启用通道。bark_* 仅作用于 Bark 通道。"""
     print(message)
     send(message, log_fn=log_fn, bark_title=bark_title, bark_level=bark_level, bark_sound=bark_sound,
          bark_icon=bark_icon, bark_subtitle=bark_subtitle, bark_url=bark_url,
-         bark_call=bark_call, bark_volume=bark_volume)
+         bark_call=bark_call, bark_volume=bark_volume, bark_fallback=bark_fallback)

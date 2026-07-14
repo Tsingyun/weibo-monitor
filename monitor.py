@@ -340,12 +340,12 @@ class Monitor:
             self.log("[FATAL] Cookie 已过期，监控暂停")
             tg_send("🚨 Cookie 已过期！\n请重新获取微博 Cookie 并更新 .env 中的 WEIBO_COOKIE", log_fn=self.log,
                     bark_title="⚠️ Cookie 已过期", bark_level="critical", bark_sound="alarm",
-                    bark_call="1", bark_volume=10)
+                    bark_call="1", bark_volume=10, bark_fallback=True)
             # 暂停轮询避免继续刷无效请求
             from notifier import send as tg_send2
             tg_send2("💤 监控已自动暂停，更新 Cookie 后重启程序即可恢复", log_fn=self.log,
                      bark_title="监控已暂停", bark_level="critical", bark_sound="alarm",
-                     bark_call="1", bark_volume=10)
+                     bark_call="1", bark_volume=10, bark_fallback=True)
             raise  # 上抛终止主循环
 
         except Exception as e:
@@ -356,7 +356,7 @@ class Monitor:
             if self.consecutive_errors >= 5 and not self.error_alert_sent:
                 tg_send(f"⚠️ 微博请求连续失败 ({self.consecutive_errors}次)\n开始时间: {beijing_str(self.error_start_time)}\n请检查 Cookie 是否过期", log_fn=self.log,
                         bark_title="⚠️ 微博请求连续失败", bark_level="critical", bark_sound="alarm",
-                        bark_call="1", bark_volume=10)
+                        bark_call="1", bark_volume=10, bark_fallback=True)
                 self.error_alert_sent = True
 
     # ---- 心跳 ----
