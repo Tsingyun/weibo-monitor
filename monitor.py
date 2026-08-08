@@ -290,14 +290,20 @@ class Monitor:
             if not desc1:
                 return
 
-            # 记录一次成功轮询（覆盖率追踪）
-            self.mark_coverage()
+            # 覆盖率追踪（本地写入，失败仅记日志，不计为连接错误）
+            try:
+                self.mark_coverage()
+            except Exception as fe:
+                self.log(f"[WARN] 覆盖率记录失败（忽略）: {fe}")
 
-            # 恢复后清除错误计数
+            # 恢复后清除错误计数（consecutive_errors 仅由真实网络/API 错误累积）
             if self.consecutive_errors > 0:
                 duration = (beijing_now() - self.error_start_time).total_seconds()
-                tg_send(f"✅ 微博连接恢复\n中断时间: {beijing_str(self.error_start_time)}\n恢复时间: {beijing_str()}\n中断时长: {format_duration(duration)}", log_fn=self.log,
-                        bark_title="微博连接恢复 ✅", bark_level="active", bark_sound="bobibo")
+                # 仅在确实发生过持续中断（已发过严重告警）时才推送"连接恢复"，
+                # 避免瞬时抖动产生的无意义推送
+                if self.error_alert_sent:
+                    tg_send(f"✅ 微博连接恢复\n中断时间: {beijing_str(self.error_start_time)}\n恢复时间: {beijing_str()}\n中断时长: {format_duration(duration)}", log_fn=self.log,
+                            bark_title="微博连接恢复 ✅", bark_level="active", bark_sound="bobibo")
                 self.consecutive_errors = 0
                 self.error_alert_sent = False
 
@@ -318,10 +324,15 @@ class Monitor:
                 return  # 状态未变，跳过
 
             log_item = {"time": beijing_str(now), "status": now_status, "desc1": desc1}
-            logs = self.read_log()
-            logs.append(log_item)
-            self.write_log(logs)
-            self.save_stats()
+            # 本地文件写入与连接逻辑解耦：写入失败只记日志，不计为"连接错误"，
+            # 也不影响本轮推送与状态判断（utils.write_json 已做原子写+重试）
+            try:
+                logs = self.read_log()
+                logs.append(log_item)
+                self.write_log(logs)
+                self.save_stats()
+            except Exception as fe:
+                self.log(f"[WARN] 本地状态写入失败（不影响本轮推送）: {fe}")
 
             # 找到最近一次上线的时间，计算在线时长
             online_at = None

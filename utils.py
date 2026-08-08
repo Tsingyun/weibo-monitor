@@ -1,6 +1,6 @@
 """工具函数模块"""
 
-import os, json
+import os, json, time
 from datetime import datetime, timedelta, timezone
 
 def beijing_now():
@@ -27,10 +27,31 @@ def read_json(path, default=None):
     except Exception:
         return default if default is not None else []
 
-def write_json(path, data):
+def write_json(path, data, retries=3, retry_delay=0.3):
+    """原子写 + 重试：先写临时文件再 os.replace，避免文件被锁时半截写入或
+    Permission denied 丢数据（events.json 被杀软/同步软件短暂锁住时不再误报连接错误）"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    last_err = None
+    for attempt in range(max(1, retries)):
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)  # 原子替换（Windows 上也覆盖目标）
+            return
+        except (OSError, PermissionError) as e:
+            last_err = e
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            if attempt < retries - 1:
+                time.sleep(retry_delay)
+    if last_err:
+        raise last_err
 
 def is_online(desc1):
     """判断在线状态（白名单模式：只认确定'当前在线'文案，其余全部离线）
