@@ -11,8 +11,12 @@ Bark: iOS 原生推送 (Apple APNs), 比 Telegram Bot 在 iOS 上更可靠/更�
 
 import time
 import json
+import ssl
+import socket
+import http.client
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 from config import (
     TG_BOT_TOKEN, TG_CHAT_ID, REQUEST_TIMEOUT,
     BARK_KEY, BARK_SERVER, BARK_ICON_URL, BARK_SOUND_URL, BARK_CLICK_URL,
@@ -20,6 +24,106 @@ from config import (
 )
 
 TELEGRAM_MAX_LENGTH = 4096
+
+# ===== Bark 直连修复 (绕开 Clash TUN + fake-ip 劫持) =====
+# 根因: 本机 Clash 处于 TUN + fake-ip 模式, 会把 api.day.app 劫持成虚拟IP 198.18.0.x;
+# 直连该虚拟IP、或经代理(海外节点)访问国内真实IP 43.155.109.24 都会失败(EOF/reset)。
+# 修复: 发送时通过 DoH 解析出真实IP(已验证证书 CN=day.app), 并将 socket 绑定到物理网卡,
+# 使流量直接从物理网卡出站、绕过 Clash TUN; 同时保留 api.day.app 作为 SNI/Host 以通过 TLS 校验,
+# 并使用 h2 ALPN(服务器要求)。无需管理员权限, 无需改动/重启 Clash。
+_BARK_REAL_IP = None
+_BARK_LOCAL_IP = None  # 物理网卡 IP, 绑定后可绕过 Clash TUN
+
+def _bark_host():
+    return urlparse(BARK_SERVER).hostname or "api.day.app"
+
+def _doh_resolve_a(hostname):
+    """通过公共 DoH 解析 A 记录, 绕开 Clash fake-ip 劫持返回真实IP (doh.pub 走直连最稳)"""
+    urls = [
+        "https://doh.pub/dns-query?name=%s&type=A" % hostname,
+        "https://119.29.29.29/dns-query?name=%s&type=A" % hostname,
+        "https://dns.google/resolve?name=%s&type=A" % hostname,
+    ]
+    for u in urls:
+        try:
+            req = urllib.request.Request(u, headers={"Accept": "application/dns-json"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            for ans in data.get("Answer", []):
+                if ans.get("type") == 1 and ans.get("data"):
+                    return ans["data"]
+        except Exception:
+            continue
+    return None
+
+def _get_bark_real_ip():
+    global _BARK_REAL_IP
+    if _BARK_REAL_IP:
+        return _BARK_REAL_IP
+    ip = _doh_resolve_a(_bark_host())
+    _BARK_REAL_IP = ip or "43.155.109.24"  # 兜底: 已验证证书的稳定真实IP(腾讯云)
+    return _BARK_REAL_IP
+
+def _physical_local_ip():
+    """返回物理网卡 IPv4 (绑定后可绕过 Clash TUN)。失败返回 None(退化为不绑定)。"""
+    global _BARK_LOCAL_IP
+    if _BARK_LOCAL_IP is not None:
+        return _BARK_LOCAL_IP
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-NetIPAddress -AddressFamily IPv4 | "
+             "Where-Object {$_.InterfaceAlias -notmatch 'Loopback'} | "
+             "ForEach-Object { $_.IPAddress }"],
+            capture_output=True, text=True, timeout=10)
+        for line in out.stdout.split():
+            ip = line.strip()
+            if not ip or ip.count('.') != 3:
+                continue
+            a, b = int(ip.split('.')[0]), int(ip.split('.')[1])
+            if a == 127:
+                continue                      # loopback
+            if a == 169 and b == 254:
+                continue                    # APIPA (蓝牙/TAP)
+            if a == 198 and b == 18:
+                continue                    # Clash fake-ip TUN(198.18.0.0/15)
+            if a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168):
+                _BARK_LOCAL_IP = ip
+                return ip
+        _BARK_LOCAL_IP = None
+    except Exception:
+        _BARK_LOCAL_IP = None
+    return _BARK_LOCAL_IP
+
+class _BarkDirectConnection(http.client.HTTPSConnection):
+    """绑定物理网卡直连真实IP, 保留 host 作为 SNI, 使用 h2 ALPN。"""
+    def __init__(self, host, real_ip, local_ip=None, port=443, **kwargs):
+        super().__init__(host, port, **kwargs)
+        self._real_ip = real_ip
+        self._local_ip = local_ip
+    def connect(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if self._local_ip:
+            sock.bind((self._local_ip, 0))
+        sock.settimeout(self.timeout)
+        sock.connect((self._real_ip, self.port))
+        ctx = ssl.create_default_context()
+        ctx.set_alpn_protocols(["http/1.1"])  # urllib 只支持 HTTP/1.1
+        self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
+
+class _BarkDirectHandler(urllib.request.HTTPSHandler):
+    """直连处理器: 用真实IP建连(绑定物理网卡), host 仍作 SNI。"""
+    def __init__(self, real_ip, local_ip):
+        super().__init__()
+        self._real_ip = real_ip
+        self._local_ip = local_ip
+    def https_open(self, req):
+        def conn_factory(host=None, port=None, **kwargs):
+            h = host or req.host
+            p = port or urlparse(req.full_url).port or 443
+            return _BarkDirectConnection(h, self._real_ip, self._local_ip, p, **kwargs)
+        return self.do_open(conn_factory, req)
 
 # ===== 代理支持 =====
 def _build_opener(proxy):
@@ -107,7 +211,13 @@ def _bark_send_one(message, log_fn=None, title=None, level=None, sound=None, ico
       call: "1" 时通知铃声循环播放 (用于紧急事件确保注意到)
       volume: 紧急警告音量 0-10 (仅 critical 级别生效, 不传默认 5)
     """
-    opener = _build_opener(BARK_PROXY)
+    if BARK_PROXY:
+        opener = _build_opener(BARK_PROXY)
+    else:
+        # 直连修复: 解析真实IP并绑定物理网卡绕过 Clash TUN
+        real_ip = _get_bark_real_ip()
+        local_ip = _physical_local_ip()
+        opener = urllib.request.build_opener(_BarkDirectHandler(real_ip, local_ip))
     for attempt in range(2):
         try:
             api_url = f"{BARK_SERVER}/{BARK_KEY}"
