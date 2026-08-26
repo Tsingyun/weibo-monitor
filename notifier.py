@@ -297,7 +297,12 @@ def send(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None
 def notify(message, log_fn=None, bark_title=None, bark_level=None, bark_sound=None, bark_icon=None,
            bark_subtitle=None, bark_url=None, bark_call=None, bark_volume=None, bark_fallback=False):
     """统一通知: 控制台 + 所有已启用通道。bark_* 仅作用于 Bark 通道。"""
-    print(message)
+    # 环境 stdout 非 UTF-8 (如 GBK) 时, 含 emoji 的消息会导致 print 抛 UnicodeEncodeError,
+    # 进而中断整条推送。这里兜底, 保证推送本身的发送不被调试输出拖垮。
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        print(message.encode("utf-8", "replace").decode("utf-8", "replace"))
     send(message, log_fn=log_fn, bark_title=bark_title, bark_level=bark_level, bark_sound=bark_sound,
          bark_icon=bark_icon, bark_subtitle=bark_subtitle, bark_url=bark_url,
          bark_call=bark_call, bark_volume=bark_volume, bark_fallback=bark_fallback)
