@@ -82,6 +82,25 @@ class Monitor:
             else:
                 i += 1
 
+        # 当前正在进行中的会话（尚未下线）: 纳入统计, 避免实时在线时长被遗漏
+        # 若 events 末尾是 online 且无对应 offline, 补一个 end=now 的 ongoing session,
+        # 下游 daily/today/total_online_minutes/longest_session 都会自然包含这段
+        if logs and logs[-1]["status"] == "online":
+            try:
+                last_time = datetime.strptime(logs[-1]["time"], "%Y-%m-%d %H:%M:%S")
+                duration = (now - last_time).total_seconds()
+                if duration > 0:
+                    sessions.append({
+                        "start": logs[-1]["time"],
+                        "end": now.strftime("%Y-%m-%d %H:%M:%S"),
+                        "date": logical_date(last_time, DAY_BOUNDARY_HOUR),
+                        "hour": last_time.hour,
+                        "duration_minutes": round(duration / 60, 1),
+                        "ongoing": True,
+                    })
+            except Exception:
+                pass
+
         stats["sessions"] = sessions
         stats["total_sessions"] = len(sessions)
         stats["total_online_minutes"] = round(sum(s["duration_minutes"] for s in sessions), 1)
