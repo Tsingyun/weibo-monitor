@@ -99,6 +99,13 @@ ARCHIVE_DAILY_PATH = os.path.join(ARCHIVE_DIR, "daily_aggregate.json")
 # 自动归档多少天前的事件；0 = 不自动归档（可用 `python archive_data.py 90` 手动执行）
 ARCHIVE_AFTER_DAYS = int(os.getenv("ARCHIVE_AFTER_DAYS", "0"))
 
+# ===== WebUI 健康检查 / 控制接口（D组）=====
+# 监控进程定期写入的心跳快照。WebUI 是独立进程，无法直读监控内存，
+# 只能读此文件来判断监控是否还活着、退避/暂停状态、Cookie 剩余天数等。
+HEALTH_PATH = os.path.join(BASE_DIR, "data", "health.json")
+# WebUI 控制接口的鉴权 token；留空 = 禁用控制接口（仅保留只读）
+WEBUI_CONTROL_TOKEN = os.getenv("WEBUI_CONTROL_TOKEN", "")
+
 # ===== 状态抖动去重 =====
 # 若某个状态持续不足该秒数就切换（多为微博接口抖动/误判），则抑制这一次切换的推送，
 # 避免「上线 20 秒 → 下线」连着推两条噪音。

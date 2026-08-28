@@ -10,7 +10,7 @@ from config import (
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
     BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, STATS_REFRESH_SECONDS,
-    MIN_SESSION_SECONDS, ARCHIVE_DAILY_PATH,
+    MIN_SESSION_SECONDS, ARCHIVE_DAILY_PATH, HEALTH_PATH,
 )
 from utils import (beijing_now, beijing_str, logical_date, is_online,
                    read_json, write_json, format_duration, cookie_expire_info)
@@ -46,6 +46,7 @@ class Monitor:
         # ---- C1 抖动去重 / C4 推送增强 ----
         self._last_status_change = None   # 上次状态变化时刻（用于去抖判断）
         self._last_offline_at = None      # 上次下线时刻（用于"距上次下线"）
+        self._last_poll_at = None         # D1: 最后一次成功轮询时刻（健康快照用）
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -204,6 +205,12 @@ class Monitor:
         for s in sessions:
             hourly[s["hour"]] += 1
         stats["hourly_distribution"] = [{"hour": h, "count": hourly[h]} for h in range(24)]
+
+        # D3: 日期 × 小时 的上线分布矩阵（供 WebUI 在线热力图使用）
+        heat = defaultdict(lambda: [0] * 24)
+        for s in sessions:
+            heat[s["date"]][s["hour"]] += 1
+        stats["daily_hour_heatmap"] = {d: heat[d] for d in sorted(heat)}
 
         stats["recent_logs"] = logs[-10:]
         stats["total_active_days"] = len({s["date"] for s in sessions if s["duration_minutes"] > 0})
@@ -491,6 +498,42 @@ class Monitor:
             return True
         return False
 
+    def write_health(self):
+        """D1/D4: 写出进程健康快照，供 WebUI 判断监控是否存活
+
+        WebUI 是独立进程，无法直读监控内存，只能读此文件。
+        含：PID / 启动时间 / 最后轮询 / 退避与暂停状态 / 待补写队列 / Cookie 剩余天数。
+        """
+        try:
+            now = beijing_now()
+            snap = {
+                "pid": os.getpid(),
+                "started_at": beijing_str(self.start_time),
+                "updated_at": beijing_str(now),
+                "last_poll_at": beijing_str(self._last_poll_at) if self._last_poll_at else None,
+                "total_checks": self.total_checks,
+                "total_notifications": self.total_notifications,
+                "status": self.last_status,
+                "backoff_level": self.backoff_level,
+                "backoff_until": beijing_str(self.backoff_until) if self.backoff_until else None,
+                "paused": self.paused,
+                "pending_events": len(self._pending_events),
+                "poll_interval": POLL_INTERVAL,
+            }
+            # Cookie 剩余有效期（预警用，WebUI 面板也展示）
+            try:
+                import config
+                info = cookie_expire_info(config.WEIBO_COOKIE)
+                if info:
+                    expire, days_left = info
+                    snap["cookie_expire_at"] = beijing_str(expire)
+                    snap["cookie_days_left"] = round(days_left, 1)
+            except Exception:
+                pass
+            write_json(HEALTH_PATH, snap)
+        except Exception as e:
+            self.log(f"[WARN] 健康快照写入失败: {e}")
+
     # ---- 主巡检 ----
     def check_and_log(self):
         from weibo import fetch_desc1, CookieExpiredError, RateLimitedError
@@ -500,6 +543,7 @@ class Monitor:
             desc1 = fetch_desc1(log_fn=self.log)
             if not desc1:
                 return
+            self._last_poll_at = beijing_now()   # D1: 记录成功轮询时刻（健康快照）
             # 请求成功 → 解除风控退避
             if self.backoff_level or self.backoff_until:
                 self._reset_backoff(reason="接口已恢复")
@@ -744,6 +788,7 @@ class Monitor:
                         self.save_stats()
                     except Exception as fe:
                         self.log(f"[WARN] 定时刷新 stats 失败: {fe}")
+                    self.write_health()   # D1/D4: 与健康同频更新进程快照
                 self.heartbeat()
                 self.daily_heartbeat()
                 self.check_cookie_expiry()   # A2: Cookie 到期预警（内部每天一次）

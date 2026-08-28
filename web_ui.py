@@ -11,12 +11,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import STATS_PATH, BASE_DIR
 
 try:
-    from flask import Flask, jsonify
+    from flask import Flask, jsonify, request
 except ImportError:
     print("需要 Flask: pip install flask")
     sys.exit(1)
 
-from utils import read_json
+from utils import read_json, write_json
 from config import EVENT_PATH, STATS_PATH, DAY_BOUNDARY_HOUR, HISTORY_PATH
 
 app = Flask(__name__)
@@ -209,6 +209,19 @@ footer{text-align:center;color:var(--muted2);font-size:.74rem;margin-top:1.5rem;
     <div class="missing-list" id="missingList"></div>
   </div>
 
+  <div class="card span2" id="healthCard">
+    <div class="c-head"><div class="c-title">监控进程健康</div><div class="c-sub" id="healthSub"></div></div>
+    <div id="staleWarn" style="display:none;padding:.7rem .9rem;margin-bottom:.9rem;border-radius:12px;
+      background:rgba(248,113,113,.14);border:1px solid rgba(248,113,113,.4);color:#F87171;font-size:.82rem"></div>
+    <div class="kpis" id="healthGrid"><div class="skeleton">加载中…</div></div>
+  </div>
+
+  <div class="card span2">
+    <div class="c-head"><div class="c-title">在线热力图</div><div class="c-sub">日期 × 小时 · 近 30 天</div></div>
+    <div id="hourHeat"><div class="skeleton">加载中…</div></div>
+    <div class="legend"><span>颜色越深 = 该小时上线次数越多（悬停查看具体次数）</span></div>
+  </div>
+
   <div class="card span2">
     <div class="c-head"><div class="c-title">最近事件</div><div class="c-sub" id="logSub"></div></div>
     <div class="tbl-wrap" id="logs"><div class="skeleton">加载中…</div></div>
@@ -373,21 +386,73 @@ function renderLogs(d){try{const l=(d.recent_logs||[]).slice().reverse();const e
   '</tbody></table>'
 }catch(e){showError('renderLogs: '+e.message);}}
 
+function renderHourHeat(d){try{
+  const wrap=document.getElementById('hourHeat');if(!wrap)return;
+  const hm=d.daily_hour_heatmap||{};
+  const dates=Object.keys(hm).slice(-30);
+  if(!dates.length){wrap.innerHTML='<div class="skeleton">暂无数据</div>';return;}
+  let mx=1;
+  dates.forEach(function(k){hm[k].forEach(function(v){if(v>mx)mx=v;});});
+  let html='<div style="overflow-x:auto;padding-bottom:.4rem">';
+  dates.forEach(function(dt){
+    html+='<div style="display:grid;grid-template-columns:58px 1fr;align-items:center;gap:.5rem;margin-bottom:3px">';
+    html+='<div style="font-size:.62rem;color:var(--muted);text-align:right;white-space:nowrap">'+dt.slice(5)+'</div>';
+    html+='<div style="display:grid;grid-template-columns:repeat(24,1fr);gap:2px">';
+    for(let h=0;h<24;h++){
+      const v=hm[dt][h]||0;
+      const bg=v?('rgba(52,211,153,'+(0.18+0.82*(v/mx)).toFixed(2)+')'):'rgba(255,255,255,0.05)';
+      html+='<div title="'+dt+' '+String(h).padStart(2,'0')+':00 · '+v+' 次" style="height:13px;border-radius:3px;background:'+bg+'"></div>';
+    }
+    html+='</div></div>';
+  });
+  html+='</div>';
+  wrap.innerHTML=html;
+}catch(e){showError('renderHourHeat: '+e.message);}}
+
+async function fetchHealth(){try{const r=await fetch('/api/health');if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}catch(e){return null}}
+
+function renderHealth(h){try{
+  const g=document.getElementById('healthGrid');if(!g)return;
+  const warn=document.getElementById('staleWarn');
+  if(!h||!h.alive){
+    if(warn){warn.style.display='block';
+      warn.textContent='⚠️ 监控进程可能已停止（下方数据可能是旧的）：'+
+        (h?(h.reason||('健康快照已 '+Math.round(h.age_seconds||0)+' 秒未更新')):'无法读取 /api/health');}
+    g.innerHTML='<div class="kpi"><div class="k-l">进程状态</div><div class="k-v">未运行</div><div class="k-s">请启动监控</div></div>';
+    return;
+  }
+  if(warn){warn.style.display='none';warn.textContent='';}
+  const days=h.cookie_days_left;
+  const cookieTxt=(days!=null)?(days+' 天'+(days<=3?' ⚠️':'')):'—';
+  g.innerHTML=[
+   ['进程',(h.pid_alive===false?'PID 已失效':'运行中'),'PID '+(h.pid||'—'),'accent'],
+   ['最后轮询',((h.last_poll_at||'—').slice(11)||'—'),'间隔 '+(h.poll_interval||15)+'s',''],
+   ['风控退避',(h.backoff_level>0?('等级 '+h.backoff_level):'正常'),(h.backoff_until?('至 '+(h.backoff_until||'').slice(11)):'无退避'),''],
+   ['暂停态',(h.paused?'是（Cookie 过期）':'否'),'',''],
+   ['待补写事件',(h.pending_events||0),'条',''],
+   ['Cookie 剩余',cookieTxt,(h.cookie_expire_at?(h.cookie_expire_at||'').slice(0,10):''),'accent']
+  ].map(function(x){return '<div class="kpi"><div class="k-l">'+x[0]+'</div><div class="k-v '+x[3]+'">'+x[1]+'</div><div class="k-s">'+x[2]+'</div></div>';}).join('');
+  const sub=document.getElementById('healthSub');
+  if(sub)sub.textContent='启动于 '+(h.started_at||'—')+' · 已检查 '+(h.total_checks||0)+' 次 · 通知 '+(h.total_notifications||0)+' 次';
+}catch(e){showError('renderHealth: '+e.message);}}
+
+async function refreshHealth(){const h=await fetchHealth();renderHealth(h);}
+
 function renderAll(d){DATA=d;renderHero(d);renderKPIs(d);renderDaily(d);renderTrend(d);renderDough(d);
-  renderHour(d);renderHeatmap(d);renderMissing(d);renderLogs(d)}
+  renderHour(d);renderHeatmap(d);renderMissing(d);renderLogs(d);renderHourHeat(d)}
 
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);
   document.getElementById('themeBtn').textContent=t==='light'?'☀️':'🌙';
   localStorage.setItem(THEME_KEY,t)}
 
 async function refresh(){const d=await fetchData();if(!d||d.empty){showError('API 返回空/无效');return}
-  if(!DATA)renderAll(d);else renderAll(d)}
+  if(!DATA)renderAll(d);else renderAll(d);refreshHealth()}
 
 document.getElementById('themeBtn').addEventListener('click',function(){
   const cur=document.documentElement.getAttribute('data-theme');
   const next=cur==='light'?'dark':'light';applyTheme(next);if(DATA)renderAll(DATA)});
 
-(function init(){const saved=localStorage.getItem(THEME_KEY)||'dark';applyTheme(saved);refresh();setInterval(refresh,30000);
+(function init(){const saved=localStorage.getItem(THEME_KEY)||'dark';applyTheme(saved);refresh();refreshHealth();setInterval(refresh,30000);setInterval(refreshHealth,30000);
   document.querySelectorAll('#rangeBtns button').forEach(function(b){b.addEventListener('click',function(){setRange(parseInt(b.dataset.r,10),b);});})})();
 </script>
 </body></html>"""
@@ -413,6 +478,63 @@ def api_stats():
 def api_logs():
     logs = read_json(EVENT_PATH, [])
     return jsonify(logs)
+
+@app.route('/api/health')
+def api_health():
+    """D1/D2/D4: 监控进程健康快照（存活判定 + 陈旧警示 + Cookie 剩余天数）"""
+    from config import HEALTH_PATH
+    from utils import beijing_now
+    from datetime import datetime
+    h = read_json(HEALTH_PATH, None)
+    if not h:
+        return jsonify({"alive": False,
+                        "reason": "未找到 health.json（监控进程未运行，或旧版本未写健康快照）"})
+    # 陈旧阈值：至少 5 分钟，或 20 倍轮询间隔
+    stale_after = max(300, int(h.get("poll_interval") or 15) * 20)
+    age = None
+    try:
+        upd = datetime.strptime(h["updated_at"], "%Y-%m-%d %H:%M:%S")
+        age = (beijing_now() - upd).total_seconds()
+    except Exception:
+        pass
+    h["alive"] = (age is not None and age <= stale_after)
+    h["age_seconds"] = round(age, 1) if age is not None else None
+    h["stale_after_seconds"] = stale_after
+    # PID 存活检测：能识别「进程已死但快照文件还在」的情况
+    pid = h.get("pid")
+    if pid:
+        try:
+            os.kill(int(pid), 0)
+            h["pid_alive"] = True
+        except Exception:
+            h["pid_alive"] = False
+    return jsonify(h)
+
+@app.route('/api/control', methods=['POST'])
+def api_control():
+    """D5: 控制接口（需 .env 配置 WEBUI_CONTROL_TOKEN 才启用，避免本地被随意操作）"""
+    from config import WEBUI_CONTROL_TOKEN
+    if not WEBUI_CONTROL_TOKEN:
+        return jsonify({"ok": False, "error": "控制接口未启用（请在 .env 设置 WEBUI_CONTROL_TOKEN）"}), 403
+    body = request.get_json(silent=True) or {}
+    token = request.headers.get("X-Token") or body.get("token")
+    if token != WEBUI_CONTROL_TOKEN:
+        return jsonify({"ok": False, "error": "token 无效"}), 401
+    action = body.get("action")
+    try:
+        if action == "refresh_stats":
+            from monitor import Monitor
+            write_json(STATS_PATH, Monitor().compute_stats())
+            return jsonify({"ok": True, "msg": "stats 已刷新"})
+        if action == "write_health":
+            from monitor import Monitor
+            Monitor().write_health()
+            return jsonify({"ok": True, "msg": "health 快照已刷新"})
+        if action == "ping":
+            return jsonify({"ok": True, "msg": "pong"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": False, "error": f"未知 action: {action}"}), 400
 
 if __name__ == '__main__':
     print("岁己SUI WebUI → http://localhost:8765")
