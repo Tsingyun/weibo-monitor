@@ -1,5 +1,6 @@
 """微博监控核心逻辑"""
 
+import os
 import time
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -8,8 +9,10 @@ from config import (
     POLL_INTERVAL, REQUEST_TIMEOUT, RETRY_COUNT,
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
+    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS,
 )
-from utils import beijing_now, beijing_str, logical_date, is_online, read_json, write_json, format_duration
+from utils import (beijing_now, beijing_str, logical_date, is_online,
+                   read_json, write_json, format_duration, cookie_expire_info)
 
 class Monitor:
     """微博超话在线状态监控器"""
@@ -28,6 +31,12 @@ class Monitor:
         self._first_poll = True  # 跳过恢复状态后的首次通知
         self._last_cov_bucket = None  # 上次写入的覆盖率分桶（避免重复写盘）
         self.session_start = None  # 本次上线的起点（推送"持续在线"用内存值，不依赖 events.json）
+        # ---- A3 风控退避 / A5 暂停态 ----
+        self.backoff_level = 0            # 当前退避等级（0 = 正常轮询）
+        self.backoff_until = None         # 退避截止时间（在此之前不巡检）
+        self.rate_limited_alerted = False # 本轮退避是否已推送过告警
+        self.paused = False               # Cookie 过期暂停态（进程存活等待热重载）
+        self._env_mtime = None            # .env 修改时间（热重载检测）
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -300,15 +309,103 @@ class Monitor:
             self.last_status = last["status"]
             self.last_desc1 = last.get("desc1")
 
+    # ---- A3 风控退避 / A5 暂停态 / Cookie 热重载 ----
+    def _env_path(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+    def _reset_backoff(self, reason=""):
+        """解除退避，恢复正常轮询"""
+        if self.backoff_level or self.backoff_until:
+            suffix = f"（{reason}）" if reason else ""
+            self.log(f"[恢复] 轮询已复位为 {POLL_INTERVAL}s{suffix}")
+        self.backoff_level = 0
+        self.backoff_until = None
+        self.rate_limited_alerted = False
+
+    def _enter_backoff(self, now):
+        """遭遇 432 风控：提升退避等级并设定恢复时间（首次推送一次告警）"""
+        self.backoff_level = min(self.backoff_level + 1, len(BACKOFF_STEPS))
+        secs = BACKOFF_STEPS[self.backoff_level - 1]
+        self.backoff_until = now + timedelta(seconds=secs)
+        self.log(f"[退避] 触发 432 风控，等级 {self.backoff_level}/{len(BACKOFF_STEPS)}，"
+                 f"{secs}s 后重试（{beijing_str(self.backoff_until)}）")
+        if not self.rate_limited_alerted:
+            self.rate_limited_alerted = True
+            try:
+                from notifier import send as tg_send
+                tg_send(
+                    "⚠️ 微博风控 (HTTP 432)\n已自动降频轮询（避免高频请求加速 Cookie 失效）\n"
+                    f"下次重试: {beijing_str(self.backoff_until)}\n"
+                    "若长时间未恢复，请更换 Cookie 更新到 .env（会自动热重载，无需重启）",
+                    log_fn=self.log,
+                    bark_title="⚠️ 微博风控降频", bark_level="passive", bark_sound="")
+            except Exception as e:
+                self.log(f"[WARN] 风控告警推送失败: {e}")
+
+    def _env_changed(self):
+        """检测 .env 是否被修改（更换 Cookie）"""
+        try:
+            mtime = os.path.getmtime(self._env_path())
+        except Exception:
+            return False
+        if self._env_mtime is None:
+            self._env_mtime = mtime
+            return False
+        if mtime != self._env_mtime:
+            self._env_mtime = mtime
+            return True
+        return False
+
+    def _reload_env(self):
+        """热重载 .env（换 Cookie 后无需重启进程）"""
+        try:
+            import importlib
+            import config
+            importlib.reload(config)
+            self.log("[Cookie] 检测到 .env 变更，已热重载配置")
+            self._reset_backoff(reason="Cookie 已更新")
+            if self.paused:
+                self.paused = False
+                self.log("[Cookie] 已解除暂停态，恢复巡检")
+            return True
+        except Exception as e:
+            self.log(f"[WARN] .env 热重载失败: {e}")
+            return False
+
+    def check_cookie_expiry(self):
+        """A2: Cookie 临近到期提醒（每天最多一次）"""
+        try:
+            import config
+            info = cookie_expire_info(config.WEIBO_COOKIE)
+            if not info:
+                return
+            expire, days_left = info
+            if days_left <= COOKIE_EXPIRE_WARN_DAYS:
+                today = beijing_now().strftime("%Y-%m-%d")
+                if getattr(self, "_cookie_warn_date", None) != today:
+                    self._cookie_warn_date = today
+                    from notifier import send as tg_send
+                    tg_send(
+                        f"⚠️ Cookie 即将过期\n剩余: {days_left:.1f} 天\n"
+                        f"过期时间: {beijing_str(expire)}\n"
+                        "请及时更新 .env 中的 WEIBO_COOKIE（更新后自动热重载，无需重启）",
+                        log_fn=self.log,
+                        bark_title="⚠️ Cookie 即将过期", bark_level="active", bark_sound="alarm")
+        except Exception as e:
+            self.log(f"[WARN] Cookie 到期检查失败: {e}")
+
     # ---- 主巡检 ----
     def check_and_log(self):
-        from weibo import fetch_desc1, CookieExpiredError
+        from weibo import fetch_desc1, CookieExpiredError, RateLimitedError
         from notifier import notify as tg_notify, send as tg_send
 
         try:
             desc1 = fetch_desc1(log_fn=self.log)
             if not desc1:
                 return
+            # 请求成功 → 解除风控退避
+            if self.backoff_level or self.backoff_until:
+                self._reset_backoff(reason="接口已恢复")
 
             # 覆盖率追踪（本地写入，失败仅记日志，不计为连接错误）
             try:
@@ -421,17 +518,20 @@ class Monitor:
                 self.session_start = None
 
         except CookieExpiredError:
-            # Cookie 过期 → 立即告警，不等待累积计数
-            self.log("[FATAL] Cookie 已过期，监控暂停")
-            tg_send("🚨 Cookie 已过期！\n请重新获取微博 Cookie 并更新 .env 中的 WEIBO_COOKIE", log_fn=self.log,
-                    bark_title="⚠️ Cookie 已过期", bark_level="critical", bark_sound="alarm",
-                    bark_call="1", bark_volume=10, bark_fallback=True)
-            # 暂停轮询避免继续刷无效请求
-            from notifier import send as tg_send2
-            tg_send2("💤 监控已自动暂停，更新 Cookie 后重启程序即可恢复", log_fn=self.log,
-                     bark_title="监控已暂停", bark_level="critical", bark_sound="alarm",
-                     bark_call="1", bark_volume=10, bark_fallback=True)
-            raise  # 上抛终止主循环
+            # A5: 改为暂停态存活（不再 raise 终止进程），更新 .env 后自动热重载恢复
+            if not self.paused:
+                self.paused = True
+                self.log("[FATAL] Cookie 已过期，进入暂停态（更新 .env 后自动恢复，无需重启）")
+                tg_send("🚨 Cookie 已过期！\n请更新 .env 中的 WEIBO_COOKIE\n"
+                        "（更新后进程会自动热重载恢复，无需重启）", log_fn=self.log,
+                        bark_title="⚠️ Cookie 已过期", bark_level="critical", bark_sound="alarm",
+                        bark_call="1", bark_volume=10, bark_fallback=True)
+            return
+
+        except RateLimitedError:
+            # A3: 432 风控 → 进入退避（不重试、不刷接口）
+            self._enter_backoff(beijing_now())
+            return
 
         except Exception as e:
             self.consecutive_errors += 1
@@ -496,9 +596,23 @@ class Monitor:
 
         try:
             while True:
+                # A3/A5: .env 变更（换 Cookie）→ 热重载并立即恢复正常轮询
+                if self._env_changed():
+                    self._reload_env()
+                # A5: 暂停态（Cookie 过期）只等待，不巡检
+                if self.paused:
+                    time.sleep(min(60, max(POLL_INTERVAL, 15)))
+                    continue
+                # A3: 退避期内跳过巡检（不重试、不刷接口）
+                now = beijing_now()
+                if self.backoff_until and now < self.backoff_until:
+                    wait = (self.backoff_until - now).total_seconds()
+                    time.sleep(max(1, min(wait, POLL_INTERVAL)))
+                    continue
                 self.check_and_log()
                 self.heartbeat()
                 self.daily_heartbeat()
+                self.check_cookie_expiry()   # A2: Cookie 到期预警（内部每天一次）
                 tg_commands.check_updates(self)
                 time.sleep(POLL_INTERVAL)
         except KeyboardInterrupt:

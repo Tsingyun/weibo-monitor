@@ -75,3 +75,11 @@ COVERAGE_PATH = os.path.join(BASE_DIR, "data", "coverage.json") # 监控覆盖�
 COVERAGE_BUCKET_MINUTES = int(os.getenv("COVERAGE_BUCKET_MINUTES", "5"))
 # 单日视为"疑似缺失"的事件数阈值（低于此值该天数据可能不完整）
 MISSING_EVENT_THRESHOLD = int(os.getenv("MISSING_EVENT_THRESHOLD", "3"))
+
+# ===== 风控退避（HTTP 432）=====
+# 连续遭遇 432 时逐级拉长轮询间隔（秒），避免高频撞风控墙加速 Cookie 被吊销。
+# 退避期内不巡检、不重试；请求恢复成功后立即复位为 POLL_INTERVAL。
+BACKOFF_STEPS = [int(x) for x in os.getenv("BACKOFF_STEPS", "60,300,900,1800").split(",") if x.strip()]
+
+# Cookie 到期预警阈值（天）：剩余有效期不足此值时，每日心跳主动提醒更换
+COOKIE_EXPIRE_WARN_DAYS = int(os.getenv("COOKIE_EXPIRE_WARN_DAYS", "3"))

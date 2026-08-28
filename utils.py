@@ -69,6 +69,27 @@ def is_online(desc1):
         return True
     return False
 
+def cookie_expire_info(cookie_str):
+    """解析 Cookie 中的 ALF（过期 Unix 时间戳）→ (过期时间 datetime, 剩余天数)
+
+    ALF 是微博下发的长效登录过期时间（UTC 时间戳）。
+    返回 None 表示 cookie 中没有可解析的 ALF 字段。
+    """
+    import re
+    if not cookie_str:
+        return None
+    m = re.search(r"ALF=(\d+)", cookie_str)
+    if not m:
+        return None
+    try:
+        ts = int(m.group(1))
+        # ALF 为 UTC 时间戳，转成北京时间
+        expire = datetime.fromtimestamp(ts, timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
+        days_left = (expire - beijing_now()).total_seconds() / 86400.0
+        return expire, days_left
+    except Exception:
+        return None
+
 def format_duration(seconds):
     """格式化时长：X天X小时X分钟"""
     if seconds < 60:

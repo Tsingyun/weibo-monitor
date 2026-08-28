@@ -125,6 +125,46 @@ class _BarkDirectHandler(urllib.request.HTTPSHandler):
             return _BarkDirectConnection(h, self._real_ip, self._local_ip, p, **kwargs)
         return self.do_open(conn_factory, req)
 
+# ===== 代理自检 =====
+# 场景: 重启电脑后 Clash 常未自动启动, Telegram 每轮发送都会卡满 REQUEST_TIMEOUT,
+# 白白拖慢主轮询。自检可让代理不可用时快速失败并跳过, 恢复后自动继续。
+_PROXY_CACHE = {}      # proxy -> (ok, ts)
+_PROXY_TTL = 60.0      # 探测结果缓存秒数
+_PROXY_LOG_TS = 0      # 代理不可用日志节流
+
+def _probe_proxy(proxy, timeout=3):
+    """探测代理端口是否可连，结果缓存 60s。无代理(直连)时返回 True。"""
+    if not proxy:
+        return True
+    now = time.time()
+    cached = _PROXY_CACHE.get(proxy)
+    if cached and (now - cached[1]) < _PROXY_TTL:
+        return cached[0]
+    ok = False
+    try:
+        p = urlparse(proxy)
+        host = p.hostname
+        port = p.port or (8080 if p.scheme in ("http", "https") else 80)
+        if host:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            try:
+                s.connect((host, port))
+                ok = True
+            finally:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+    except Exception:
+        ok = False
+    _PROXY_CACHE[proxy] = (ok, now)
+    return ok
+
+def tg_proxy_available():
+    """Telegram 代理是否可用（未配置代理时视为可用）。"""
+    return _probe_proxy(TELEGRAM_PROXY)
+
 # ===== 代理支持 =====
 def _build_opener(proxy):
     """若有代理地址则返回带 ProxyHandler 的 opener, 否则返回默认 opener (均有 .open 方法)"""
@@ -173,6 +213,14 @@ def _chunk_message(text, max_len=TELEGRAM_MAX_LENGTH):
 # ===== Telegram 通道 =====
 def _tg_send_one(message, log_fn=None):
     """发送单条 Telegram 消息 (带重试)"""
+    # A4: 代理不可用时快速跳过，避免每轮卡满 REQUEST_TIMEOUT 拖慢主轮询
+    if not tg_proxy_available():
+        global _PROXY_LOG_TS
+        _now = time.time()
+        if log_fn and (_now - _PROXY_LOG_TS) > 300:
+            log_fn("Telegram 代理不可用，跳过本次发送（Clash 未启动？）")
+            _PROXY_LOG_TS = _now
+        return False
     opener = _build_opener(TELEGRAM_PROXY)
     for attempt in range(2):
         try:
