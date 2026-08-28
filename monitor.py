@@ -212,6 +212,25 @@ class Monitor:
             heat[s["date"]][s["hour"]] += 1
         stats["daily_hour_heatmap"] = {d: heat[d] for d in sorted(heat)}
 
+        # F4: 上线间隔分布（相邻两次上线的间隔，分钟）+ 摘要统计
+        try:
+            starts = sorted(datetime.strptime(s["start"], "%Y-%m-%d %H:%M:%S")
+                            for s in sessions if s.get("start"))
+            gaps = [round((b - a).total_seconds() / 60, 1)
+                    for a, b in zip(starts, starts[1:])]
+            stats["online_gaps_minutes"] = gaps
+            if gaps:
+                import statistics
+                stats["online_gap_summary"] = {
+                    "count": len(gaps),
+                    "avg_minutes": round(statistics.mean(gaps), 1),
+                    "median_minutes": round(statistics.median(gaps), 1),
+                    "max_minutes": max(gaps),
+                    "min_minutes": min(gaps),
+                }
+        except Exception:
+            stats["online_gaps_minutes"] = []
+
         stats["recent_logs"] = logs[-10:]
         stats["total_active_days"] = len({s["date"] for s in sessions if s["duration_minutes"] > 0})
         if sessions:

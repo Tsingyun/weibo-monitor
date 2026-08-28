@@ -8,7 +8,15 @@ data/stats.json
 data/coverage.json
 data/tg_offset.txt
 data/monitor.lock
+data/health.json
+data/archive/
 backups/
+
+# 导出产物与根目录运行日志（E3：这些是运行产物，不应入库）
+export/
+mon_*.log
+webui_*.log
+*.log.bak
 
 # Python
 venv/
