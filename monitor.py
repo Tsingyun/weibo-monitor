@@ -9,7 +9,7 @@ from config import (
     POLL_INTERVAL, REQUEST_TIMEOUT, RETRY_COUNT,
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
-    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS,
+    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, STATS_REFRESH_SECONDS,
 )
 from utils import (beijing_now, beijing_str, logical_date, is_online,
                    read_json, write_json, format_duration, cookie_expire_info)
@@ -37,6 +37,11 @@ class Monitor:
         self.rate_limited_alerted = False # 本轮退避是否已推送过告警
         self.paused = False               # Cookie 过期暂停态（进程存活等待热重载）
         self._env_mtime = None            # .env 修改时间（热重载检测）
+        # ---- B1 事件补写队列 / B2 统计定时刷新 / B3 今日计数 ----
+        self._pending_events = []         # 写入失败待补写的事件
+        self._last_stats_save = None      # 上次 stats 落盘时间
+        self._today_online_date = None    # 今日上线计数所属逻辑日
+        self._today_online_count = 0      # 今日上线次数（内存计数，不依赖 events.json）
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -44,6 +49,54 @@ class Monitor:
 
     def write_log(self, arr):
         write_json(EVENT_PATH, arr)
+
+    def _append_session(self, sessions, start_dt, end_dt, ongoing=False):
+        """将会话加入列表；跨越逻辑日界时自动拆成两段，各自归属对应日期（B4）
+
+        例：昨晚 23:00 上线、次日 10:00 下线，日界 08:00 时
+            → 拆为 [23:00, 08:00) 归昨天 + [08:00, 10:00) 归今天
+        这样"今日在线时长"才不会漏掉跨凌晨的那一段。
+        """
+        start_ld = logical_date(start_dt, DAY_BOUNDARY_HOUR)
+        end_ld = logical_date(end_dt, DAY_BOUNDARY_HOUR)
+        if start_ld == end_ld:
+            dur = (end_dt - start_dt).total_seconds()
+            if dur <= 0:
+                return
+            item = {
+                "start": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "end": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": start_ld,
+                "hour": start_dt.hour,
+                "duration_minutes": round(dur / 60, 1),
+            }
+            if ongoing:
+                item["ongoing"] = True
+            sessions.append(item)
+            return
+        # 跨日界：以 end_ld 当天的日界时刻为分界，拆成两段
+        boundary = datetime.strptime(end_ld, "%Y-%m-%d") + timedelta(hours=DAY_BOUNDARY_HOUR)
+        first_secs = (boundary - start_dt).total_seconds()
+        second_secs = (end_dt - boundary).total_seconds()
+        if first_secs > 0:
+            sessions.append({
+                "start": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "end": boundary.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": start_ld,
+                "hour": start_dt.hour,
+                "duration_minutes": round(first_secs / 60, 1),
+            })
+        if second_secs > 0:
+            item = {
+                "start": boundary.strftime("%Y-%m-%d %H:%M:%S"),
+                "end": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": end_ld,
+                "hour": boundary.hour,
+                "duration_minutes": round(second_secs / 60, 1),
+            }
+            if ongoing:
+                item["ongoing"] = True
+            sessions.append(item)
 
     # ---- 统计 ----
     def compute_stats(self):
@@ -80,13 +133,8 @@ class Monitor:
                         continue
                     duration = (end - start).total_seconds()
                     if duration > 0:
-                        sessions.append({
-                            "start": start.strftime("%Y-%m-%d %H:%M:%S"),
-                            "end": end.strftime("%Y-%m-%d %H:%M:%S"),
-                            "date": logical_date(start, DAY_BOUNDARY_HOUR),
-                            "hour": start.hour,
-                            "duration_minutes": round(duration / 60, 1),
-                        })
+                        # B4: 跨逻辑日界的会话自动拆分归属
+                        self._append_session(sessions, start, end)
                 except Exception:
                     i += 1
             else:
@@ -100,14 +148,8 @@ class Monitor:
                 last_time = datetime.strptime(logs[-1]["time"], "%Y-%m-%d %H:%M:%S")
                 duration = (now - last_time).total_seconds()
                 if duration > 0:
-                    sessions.append({
-                        "start": logs[-1]["time"],
-                        "end": now.strftime("%Y-%m-%d %H:%M:%S"),
-                        "date": logical_date(last_time, DAY_BOUNDARY_HOUR),
-                        "hour": last_time.hour,
-                        "duration_minutes": round(duration / 60, 1),
-                        "ongoing": True,
-                    })
+                    # B4: 同样走拆分逻辑，跨天在线时长会分给对应两天
+                    self._append_session(sessions, last_time, now, ongoing=True)
             except Exception:
                 pass
 
@@ -394,6 +436,40 @@ class Monitor:
         except Exception as e:
             self.log(f"[WARN] Cookie 到期检查失败: {e}")
 
+    # ---- B1 事件补写 / B2 统计定时刷新 ----
+    def _flush_pending_events(self):
+        """B1: 补写此前写入失败的事件（按时间有序合并回 events.json）
+
+        根治事件丢失：events.json 被锁导致写入失败时，事件进内存队列，
+        后续轮次自动补写并按时间排序，保证事件流完整、统计不丢。
+        """
+        if not self._pending_events:
+            return
+        try:
+            logs = self.read_log()
+            merged = logs + self._pending_events
+            merged.sort(key=lambda e: e.get("time", ""))
+            self.write_log(merged)
+            self.save_stats()
+            self.log(f"[补写] 已补写 {len(self._pending_events)} 条此前写入失败的事件")
+            self._pending_events = []
+            self._last_stats_save = beijing_now()
+        except Exception as fe:
+            self.log(f"[WARN] 补写事件失败，继续保留在队列（当前 {len(self._pending_events)} 条）: {fe}")
+
+    def _stats_due(self):
+        """B2: 是否到了定时刷新 stats 的时间（让 ongoing 会话时长持续增长）"""
+        if STATS_REFRESH_SECONDS <= 0:
+            return False
+        now = beijing_now()
+        if self._last_stats_save is None:
+            self._last_stats_save = now
+            return True
+        if (now - self._last_stats_save).total_seconds() >= STATS_REFRESH_SECONDS:
+            self._last_stats_save = now
+            return True
+        return False
+
     # ---- 主巡检 ----
     def check_and_log(self):
         from weibo import fetch_desc1, CookieExpiredError, RateLimitedError
@@ -455,11 +531,19 @@ class Monitor:
             if now_status == self.last_status:
                 return  # 状态未变，跳过
 
-            # 状态真变化: online 时记本次上线起点(内存), 用于推送 dur 不依赖 events.json
+            today_logical = logical_date(now, DAY_BOUNDARY_HOUR)
+            # 状态真变化: online 时记本次上线起点(内存) + 今日次数(内存计数)
             if now_status == "online":
                 self.session_start = now
+                # B3: 今日上线次数用内存计数（不依赖 events.json，写入失败也不会少算）
+                if self._today_online_date != today_logical:
+                    self._today_online_date = today_logical
+                    self._today_online_count = 0
+                self._today_online_count += 1
 
             log_item = {"time": beijing_str(now), "status": now_status, "desc1": desc1}
+            # B1: 先补写此前写入失败的事件，再写本轮事件
+            self._flush_pending_events()
             # 本地文件写入与连接逻辑解耦：写入失败只记日志，不计为"连接错误"，
             # 也不影响本轮推送与状态判断（utils.write_json 已做原子写+重试）
             try:
@@ -467,8 +551,11 @@ class Monitor:
                 logs.append(log_item)
                 self.write_log(logs)
                 self.save_stats()
+                self._last_stats_save = now
             except Exception as fe:
-                self.log(f"[WARN] 本地状态写入失败（不影响本轮推送）: {fe}")
+                # B1: 写入失败 → 入队，后续轮次自动补写（不再永久丢失事件）
+                self.log(f"[WARN] 本地状态写入失败（不影响本轮推送，已入队待补写）: {fe}")
+                self._pending_events.append(log_item)
 
             # 本次上线起点优先用内存 session_start, 不依赖 events.json 完整性
             # (兜底: 若 session_start 缺失才从 logs 反查, 兼容异常重启场景)
@@ -492,17 +579,8 @@ class Monitor:
             self.log(msg)
             bark_title = "岁己SUI 上线啦 🟢" if now_status == "online" else "岁己SUI 下线了 🔴"
             # 副标题: 上线显示今日次数, 下线显示本次持续时长 (信息分层)
-            # 用 logical_date 统一"今天"的界定（按岁己作息日界），与 stats 统计保持一致
-            today_logical = logical_date(now, DAY_BOUNDARY_HOUR)
-            today_online = 0
-            for e in logs:
-                if e["status"] == "online":
-                    try:
-                        edt = datetime.strptime(e["time"], "%Y-%m-%d %H:%M:%S")
-                    except Exception:
-                        continue
-                    if logical_date(edt, DAY_BOUNDARY_HOUR) == today_logical:
-                        today_online += 1
+            # B3: 今日次数改用内存计数（不依赖 events.json，即便写入失败也不会少算）
+            today_online = self._today_online_count
             if now_status == "online":
                 bark_subtitle = f"今日第 {today_online} 次上线"
             else:
@@ -610,6 +688,12 @@ class Monitor:
                     time.sleep(max(1, min(wait, POLL_INTERVAL)))
                     continue
                 self.check_and_log()
+                # B2: 定时刷新 stats（让 ongoing 会话时长持续增长，WebUI 数据不再陈旧）
+                if self._stats_due():
+                    try:
+                        self.save_stats()
+                    except Exception as fe:
+                        self.log(f"[WARN] 定时刷新 stats 失败: {fe}")
                 self.heartbeat()
                 self.daily_heartbeat()
                 self.check_cookie_expiry()   # A2: Cookie 到期预警（内部每天一次）

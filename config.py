@@ -83,3 +83,9 @@ BACKOFF_STEPS = [int(x) for x in os.getenv("BACKOFF_STEPS", "60,300,900,1800").s
 
 # Cookie 到期预警阈值（天）：剩余有效期不足此值时，每日心跳主动提醒更换
 COOKIE_EXPIRE_WARN_DAYS = int(os.getenv("COOKIE_EXPIRE_WARN_DAYS", "3"))
+
+# ===== 统计定时刷新（秒）=====
+# stats.json 原先只在「状态发生变化」时才重算，导致长时间持续在线时
+# 「今日在线时长」/ ongoing 会话时长不增长、WebUI 数据陈旧。
+# 设为 0 可关闭定时刷新（退回仅在状态变化时更新）。
+STATS_REFRESH_SECONDS = int(os.getenv("STATS_REFRESH_SECONDS", "300"))
