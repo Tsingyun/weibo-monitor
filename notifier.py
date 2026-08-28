@@ -33,6 +33,7 @@ TELEGRAM_MAX_LENGTH = 4096
 # 并使用 h2 ALPN(服务器要求)。无需管理员权限, 无需改动/重启 Clash。
 _BARK_REAL_IP = None
 _BARK_LOCAL_IP = None  # 物理网卡 IP, 绑定后可绕过 Clash TUN
+_BARK_LOCAL_IP_TS = 0  # C2: 上述探测结果的缓存时间戳（含失败也缓存）
 
 def _bark_host():
     return urlparse(BARK_SERVER).hostname or "api.day.app"
@@ -65,10 +66,16 @@ def _get_bark_real_ip():
     return _BARK_REAL_IP
 
 def _physical_local_ip():
-    """返回物理网卡 IPv4 (绑定后可绕过 Clash TUN)。失败返回 None(退化为不绑定)。"""
-    global _BARK_LOCAL_IP
-    if _BARK_LOCAL_IP is not None:
+    """返回物理网卡 IPv4 (绑定后可绕过 Clash TUN)。失败返回 None(退化为不绑定)。
+
+    C2: 探测结果（含失败）按 TTL 缓存，避免每次发推送都 subprocess 拉起 powershell（约 1s 开销）。
+    """
+    global _BARK_LOCAL_IP, _BARK_LOCAL_IP_TS
+    now = time.time()
+    if _BARK_LOCAL_IP is not None and (now - _BARK_LOCAL_IP_TS) < 300:
         return _BARK_LOCAL_IP
+    if _BARK_LOCAL_IP is None and _BARK_LOCAL_IP_TS and (now - _BARK_LOCAL_IP_TS) < 60:
+        return None  # 失败结果也短暂缓存，避免频繁拉起 powershell
     try:
         import subprocess
         out = subprocess.run(
@@ -90,10 +97,12 @@ def _physical_local_ip():
                 continue                    # Clash fake-ip TUN(198.18.0.0/15)
             if a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168):
                 _BARK_LOCAL_IP = ip
+                _BARK_LOCAL_IP_TS = now
                 return ip
         _BARK_LOCAL_IP = None
     except Exception:
         _BARK_LOCAL_IP = None
+    _BARK_LOCAL_IP_TS = now
     return _BARK_LOCAL_IP
 
 class _BarkDirectConnection(http.client.HTTPSConnection):

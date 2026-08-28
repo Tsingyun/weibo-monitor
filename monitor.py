@@ -10,6 +10,7 @@ from config import (
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
     BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, STATS_REFRESH_SECONDS,
+    MIN_SESSION_SECONDS,
 )
 from utils import (beijing_now, beijing_str, logical_date, is_online,
                    read_json, write_json, format_duration, cookie_expire_info)
@@ -42,6 +43,9 @@ class Monitor:
         self._last_stats_save = None      # 上次 stats 落盘时间
         self._today_online_date = None    # 今日上线计数所属逻辑日
         self._today_online_count = 0      # 今日上线次数（内存计数，不依赖 events.json）
+        # ---- C1 抖动去重 / C4 推送增强 ----
+        self._last_status_change = None   # 上次状态变化时刻（用于去抖判断）
+        self._last_offline_at = None      # 上次下线时刻（用于"距上次下线"）
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -509,6 +513,7 @@ class Monitor:
                 self._first_poll = False
                 self.last_status = now_status
                 self.last_desc1 = desc1
+                self._last_status_change = now   # C1: 初始化去抖基准，避免首轮被误判为抖动
                 # 同步本次会话起点, 避免 events 写入失败时推送 dur 错位
                 if now_status == "online":
                     try:
@@ -569,12 +574,33 @@ class Monitor:
                     except Exception:
                         continue
 
+            # C1: 抖动去重 —— 上一状态持续过短（多为接口抖动/误判）时抑制本次推送
+            suppress_push = False
+            if self._last_status_change is not None and MIN_SESSION_SECONDS > 0:
+                held = (now - self._last_status_change).total_seconds()
+                if held < MIN_SESSION_SECONDS:
+                    suppress_push = True
+                    self.log(f"[去抖] 上次状态仅持续 {held:.0f}s（< {MIN_SESSION_SECONDS}s），"
+                             f"抑制本次推送（事件仍已记录到 events.json）")
+            self._last_status_change = now
+            if suppress_push:
+                # 事件已写入，仅跳过推送与计数，保证数据不丢
+                self.last_status = now_status
+                if now_status == "offline":
+                    self._last_offline_at = now
+                    self.session_start = None
+                return
+
             self.total_notifications += 1
             label = "🟢 上线" if now_status == "online" else "🔴 下线"
             msg = f"岁己SUI {label}\n{log_item['time']}\n{desc1}"
             if now_status == "offline" and online_at:
                 dur = (now - online_at).total_seconds()
                 msg += f"\n持续在线: {format_duration(dur)}"
+            # C4: 上线时补充"距上次下线"间隔，便于判断隔了多久才再来
+            if now_status == "online" and self._last_offline_at:
+                gap = (now - self._last_offline_at).total_seconds()
+                msg += f"\n距上次下线: {format_duration(gap)}"
 
             self.log(msg)
             bark_title = "岁己SUI 上线啦 🟢" if now_status == "online" else "岁己SUI 下线了 🔴"
@@ -593,6 +619,7 @@ class Monitor:
             self.last_desc1 = desc1
             # 下线后清空 session_start, 下次真上线时重设
             if now_status == "offline":
+                self._last_offline_at = now
                 self.session_start = None
 
         except CookieExpiredError:
@@ -640,7 +667,13 @@ class Monitor:
             today8 -= timedelta(days=1)
         if hasattr(self, '_last_daily_hb') and (now - self._last_daily_hb).total_seconds() < 3600:
             return
-        if abs((now - today8).total_seconds()) < POLL_INTERVAL + 5:
+        # C3: 正常时间窗内发送；若 08:00 时进程未运行（错过窗口），
+        #     今天已过该时点且当天还没发过 → 启动后补发一次，避免整天漏掉摘要
+        in_window = abs((now - today8).total_seconds()) < POLL_INTERVAL + 5
+        already_today = (hasattr(self, '_last_daily_hb')
+                         and self._last_daily_hb.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d"))
+        missed_today = (now.hour >= HEARTBEAT_HOUR) and not already_today
+        if in_window or missed_today:
             elapsed = format_duration((now - self.start_time).total_seconds())
             status = "在线" if self.last_status == "online" else "离线"
             msg = (

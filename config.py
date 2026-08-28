@@ -89,3 +89,9 @@ COOKIE_EXPIRE_WARN_DAYS = int(os.getenv("COOKIE_EXPIRE_WARN_DAYS", "3"))
 # 「今日在线时长」/ ongoing 会话时长不增长、WebUI 数据陈旧。
 # 设为 0 可关闭定时刷新（退回仅在状态变化时更新）。
 STATS_REFRESH_SECONDS = int(os.getenv("STATS_REFRESH_SECONDS", "300"))
+
+# ===== 状态抖动去重 =====
+# 若某个状态持续不足该秒数就切换（多为微博接口抖动/误判），则抑制这一次切换的推送，
+# 避免「上线 20 秒 → 下线」连着推两条噪音。
+# 事件本身仍会写入 events.json（数据不丢，只是不推送）。设为 0 可关闭去抖。
+MIN_SESSION_SECONDS = int(os.getenv("MIN_SESSION_SECONDS", "30"))
