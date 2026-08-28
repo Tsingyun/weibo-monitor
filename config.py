@@ -90,6 +90,15 @@ COOKIE_EXPIRE_WARN_DAYS = int(os.getenv("COOKIE_EXPIRE_WARN_DAYS", "3"))
 # 设为 0 可关闭定时刷新（退回仅在状态变化时更新）。
 STATS_REFRESH_SECONDS = int(os.getenv("STATS_REFRESH_SECONDS", "300"))
 
+# ===== 数据归档（B5）=====
+# events.json 只增不减。归档把过期事件移入 data/archive/events_YYYY-MM.json（原始数据可追溯），
+# 并把这些事件产生的「每日聚合」累加进 data/archive/daily_aggregate.json，
+# compute_stats 会自动合并该聚合，保证历史统计不丢、events.json 保持精简。
+ARCHIVE_DIR = os.path.join(BASE_DIR, "data", "archive")
+ARCHIVE_DAILY_PATH = os.path.join(ARCHIVE_DIR, "daily_aggregate.json")
+# 自动归档多少天前的事件；0 = 不自动归档（可用 `python archive_data.py 90` 手动执行）
+ARCHIVE_AFTER_DAYS = int(os.getenv("ARCHIVE_AFTER_DAYS", "0"))
+
 # ===== 状态抖动去重 =====
 # 若某个状态持续不足该秒数就切换（多为微博接口抖动/误判），则抑制这一次切换的推送，
 # 避免「上线 20 秒 → 下线」连着推两条噪音。

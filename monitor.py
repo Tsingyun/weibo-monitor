@@ -10,7 +10,7 @@ from config import (
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
     BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, STATS_REFRESH_SECONDS,
-    MIN_SESSION_SECONDS,
+    MIN_SESSION_SECONDS, ARCHIVE_DAILY_PATH,
 )
 from utils import (beijing_now, beijing_str, logical_date, is_online,
                    read_json, write_json, format_duration, cookie_expire_info)
@@ -102,25 +102,8 @@ class Monitor:
                 item["ongoing"] = True
             sessions.append(item)
 
-    # ---- 统计 ----
-    def compute_stats(self):
-        logs = self.read_log()
-        if not logs:
-            return {"empty": True}
-
-        now = beijing_now()
-        today_logical = logical_date(now, DAY_BOUNDARY_HOUR)
-        stats = {
-            "empty": False,
-            "generated_at": beijing_str(now),
-            "total_events": len(logs),
-            "current_status": logs[-1]["status"],
-            "current_desc1": logs[-1].get("desc1", ""),
-            "last_event_time": logs[-1]["time"],
-        }
-
-        # 在线会话
-        sessions = []
+    def _build_sessions_from(self, logs, sessions):
+        """从事件列表构建会话（配对 online→offline），供 compute_stats 与归档工具复用"""
         i = 0
         while i < len(logs) - 1:
             if logs[i]["status"] == "online":
@@ -143,6 +126,27 @@ class Monitor:
                     i += 1
             else:
                 i += 1
+
+    # ---- 统计 ----
+    def compute_stats(self):
+        logs = self.read_log()
+        if not logs:
+            return {"empty": True}
+
+        now = beijing_now()
+        today_logical = logical_date(now, DAY_BOUNDARY_HOUR)
+        stats = {
+            "empty": False,
+            "generated_at": beijing_str(now),
+            "total_events": len(logs),
+            "current_status": logs[-1]["status"],
+            "current_desc1": logs[-1].get("desc1", ""),
+            "last_event_time": logs[-1]["time"],
+        }
+
+        # 在线会话
+        sessions = []
+        self._build_sessions_from(logs, sessions)
 
         # 当前正在进行中的会话（尚未下线）: 纳入统计, 避免实时在线时长被遗漏
         # 若 events 末尾是 online 且无对应 offline, 补一个 end=now 的 ongoing session,
@@ -174,6 +178,19 @@ class Monitor:
         for s in sessions:
             daily[s["date"]]["sessions"] += 1
             daily[s["date"]]["minutes"] += s["duration_minutes"]
+
+        # B5: 合并已归档事件的每日聚合（旧事件移入 archive/ 后，历史统计依然完整）
+        arch = read_json(ARCHIVE_DAILY_PATH, {})
+        if arch:
+            for d, v in arch.items():
+                if d in daily:
+                    daily[d]["online_count"] += v.get("online_count", 0)
+                    daily[d]["sessions"] += v.get("sessions", 0)
+                    daily[d]["minutes"] += v.get("minutes", 0)
+                else:
+                    daily[d] = {"online_count": v.get("online_count", 0),
+                                "sessions": v.get("sessions", 0),
+                                "minutes": v.get("minutes", 0)}
 
         daily_list = [{"date": d, **daily[d]} for d in sorted(daily)]
         for d in daily_list:
