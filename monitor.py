@@ -27,6 +27,7 @@ class Monitor:
         self.total_notifications = 0
         self._first_poll = True  # 跳过恢复状态后的首次通知
         self._last_cov_bucket = None  # 上次写入的覆盖率分桶（避免重复写盘）
+        self.session_start = None  # 本次上线的起点（推送"持续在线"用内存值，不依赖 events.json）
 
     # ---- 日志读写 ----
     def read_log(self):
@@ -335,12 +336,31 @@ class Monitor:
                 self._first_poll = False
                 self.last_status = now_status
                 self.last_desc1 = desc1
+                # 同步本次会话起点, 避免 events 写入失败时推送 dur 错位
+                if now_status == "online":
+                    try:
+                        _logs = self.read_log()
+                        # events 末条可能是 offline, 找最近一条 online 作为延续起点
+                        _t = None
+                        for _e in reversed(_logs):
+                            if _e.get("status") == "online":
+                                _t = _e["time"]
+                                break
+                        self.session_start = datetime.strptime(_t, "%Y-%m-%d %H:%M:%S") if _t else now
+                    except Exception:
+                        self.session_start = now
+                else:
+                    self.session_start = None
                 self.log(f"[就绪] 首次轮询完成，当前状态: {'在线' if now_status == 'online' else '离线'}")
                 return
 
             # 仅在状态真正变化时通知
             if now_status == self.last_status:
                 return  # 状态未变，跳过
+
+            # 状态真变化: online 时记本次上线起点(内存), 用于推送 dur 不依赖 events.json
+            if now_status == "online":
+                self.session_start = now
 
             log_item = {"time": beijing_str(now), "status": now_status, "desc1": desc1}
             # 本地文件写入与连接逻辑解耦：写入失败只记日志，不计为"连接错误"，
@@ -353,12 +373,17 @@ class Monitor:
             except Exception as fe:
                 self.log(f"[WARN] 本地状态写入失败（不影响本轮推送）: {fe}")
 
-            # 找到最近一次上线的时间，计算在线时长
-            online_at = None
-            for entry in reversed(logs[:-1]):  # 排除刚写入的
-                if entry["status"] == "online":
-                    online_at = datetime.strptime(entry["time"], "%Y-%m-%d %H:%M:%S")
-                    break
+            # 本次上线起点优先用内存 session_start, 不依赖 events.json 完整性
+            # (兜底: 若 session_start 缺失才从 logs 反查, 兼容异常重启场景)
+            online_at = self.session_start
+            if online_at is None:
+                for entry in reversed(logs[:-1]):
+                    try:
+                        if entry["status"] == "online":
+                            online_at = datetime.strptime(entry["time"], "%Y-%m-%d %H:%M:%S")
+                            break
+                    except Exception:
+                        continue
 
             self.total_notifications += 1
             label = "🟢 上线" if now_status == "online" else "🔴 下线"
@@ -391,6 +416,9 @@ class Monitor:
 
             self.last_status = now_status
             self.last_desc1 = desc1
+            # 下线后清空 session_start, 下次真上线时重设
+            if now_status == "offline":
+                self.session_start = None
 
         except CookieExpiredError:
             # Cookie 过期 → 立即告警，不等待累积计数
