@@ -878,11 +878,25 @@ class Monitor:
                         self._reload_env()
                     # A5: 暂停态（Cookie 过期）只等待，不巡检
                     if self.paused:
+                        # 暂停是「正常等待」，进程本身是健康的 —— 必须继续刷心跳。
+                        # 否则 watchdog 会因心跳停滞 >300s 把好进程误判为 stale 杀掉重拉，
+                        # 形成「暂停 -> 被杀 -> 重启 -> 再暂停」的无效重启循环。
+                        try:
+                            self.write_health()
+                        except Exception:
+                            pass
                         time.sleep(min(60, max(POLL_INTERVAL, 15)))
                         continue
                     # A3: 退避期内跳过巡检（不重试、不刷接口）
                     now = beijing_now()
                     if self.backoff_until and now < self.backoff_until:
+                        # 退避等级 3/4 长达 900s 以上，远超 watchdog 的 300s stale 阈值。
+                        # 退避只是「不发请求」，进程依然是活的 —— 必须刷心跳，
+                        # 否则必被看门狗误杀，形成「432 -> 退避 -> 被杀 -> 重启 -> 再 432」死循环。
+                        try:
+                            self.write_health()
+                        except Exception:
+                            pass
                         wait = (self.backoff_until - now).total_seconds()
                         time.sleep(max(1, min(wait, POLL_INTERVAL)))
                         continue
