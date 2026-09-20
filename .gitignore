@@ -10,12 +10,17 @@ data/tg_offset.txt
 data/monitor.lock
 data/health.json
 data/archive/
+# 运行时状态（易变、含本机 PID 与时间戳，不应入库）
+data/daily_hb.json
+data/last_start_notify.json
+data/last_death.json
 backups/
 
 # 导出产物与根目录运行日志（E3：这些是运行产物，不应入库）
 export/
 mon_*.log
 webui_*.log
+watchdog_*.log
 *.log.bak
 
 # Python

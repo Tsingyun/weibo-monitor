@@ -15,6 +15,16 @@ from config import (
 from utils import (beijing_now, beijing_str, logical_date, is_online,
                    read_json, write_json, format_duration, cookie_expire_info)
 
+# 心跳刷新间隔：health.json 至少每 60s 刷新一次（独立于 5 分钟的 stats 刷新）。
+# 修复：原先 health 只在 stats 刷新（STATS_REFRESH_SECONDS=300s）时写，watchdog 看到的心跳
+# age 会冲到 300s+（实测 307s），越过其停滞阈值 → 周期性误杀好进程并重启，
+# 表现为 Bark 反复收到「监控已启动」「运行摘要」。
+HEALTH_REFRESH_SECONDS = 60
+
+# 启动通知最小间隔：短时间内的重复启动（如看门狗误判重启）不再重复推「监控已启动」
+START_NOTIFY_MIN_GAP = 600
+
+
 class Monitor:
     """微博超话在线状态监控器"""
 
@@ -54,6 +64,27 @@ class Monitor:
 
     def write_log(self, arr):
         write_json(EVENT_PATH, arr)
+
+    def _compute_today_online_count(self, logs):
+        """从 events.json 计算今日（按逻辑日）已发生过的 online 事件数。
+
+        用途：restore_state 时初始化 _today_online_count，避免新 monitor 启动后
+        在已有 N 次上线的情况下，把下一次状态变化错计为"今日第 1 次上线"
+        （这正是重复推送里"第 1 次 / 第 9 次 同时弹"的根因之一）。
+        """
+        if not logs:
+            return 0
+        today = logical_date(beijing_now(), DAY_BOUNDARY_HOUR)
+        n = 0
+        for e in logs:
+            try:
+                t = datetime.strptime(e["time"], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+            if (e.get("status") == "online"
+                    and logical_date(t, DAY_BOUNDARY_HOUR) == today):
+                n += 1
+        return n
 
     def _append_session(self, sessions, start_dt, end_dt, ongoing=False):
         """将会话加入列表；跨越逻辑日界时自动拆成两段，各自归属对应日期（B4）
@@ -397,6 +428,10 @@ class Monitor:
             last = logs[-1]
             self.last_status = last["status"]
             self.last_desc1 = last.get("desc1")
+            # 从 events.json 重算今日已累加的上线次数，
+            # 否则重启/重启电脑后新 monitor 会把下一次状态变化误计为"今日第 1 次上线"
+            self._today_online_count = self._compute_today_online_count(logs)
+            self._today_online_date = logical_date(beijing_now(), DAY_BOUNDARY_HOUR)
 
     # ---- A3 风控退避 / A5 暂停态 / Cookie 热重载 ----
     def _env_path(self):
@@ -514,6 +549,19 @@ class Monitor:
             return True
         if (now - self._last_stats_save).total_seconds() >= STATS_REFRESH_SECONDS:
             self._last_stats_save = now
+            return True
+        return False
+
+    def _health_due(self):
+        """轻量心跳：至少每 HEALTH_REFRESH_SECONDS 刷新一次 health.json。
+
+        修复反复重启：health 原先只在 stats 刷新（300s）时写，watchdog 看到的心跳
+        age 会冲到 300s+，越过其停滞阈值 → 周期性误杀好进程并重启。高频心跳后 age 始终很小。
+        """
+        now = beijing_now()
+        last = getattr(self, "_last_health_write", None)
+        if last is None or (now - last).total_seconds() >= HEALTH_REFRESH_SECONDS:
+            self._last_health_write = now
             return True
         return False
 
@@ -737,23 +785,35 @@ class Monitor:
             self.log(f"[心跳] 运行中... checks={self.total_checks} notifications={self.total_notifications} status={self.last_status}")
 
     def daily_heartbeat(self):
-        """每日 08:00 发送运行摘要"""
+        """每日 08:00 发送运行摘要
+
+        修复：发送日期持久化到 data/daily_hb.json。原先只记在内存（_last_daily_hb），
+        进程一重启就丢失 → 误判「今日未发」→ 每次重启都补发一次摘要（Bark 反复弹
+        「运行时间 2 秒」的运行摘要，即由此而来）。
+        """
         from notifier import send as tg_send
         if not HEARTBEAT_ENABLED:
             return
         now = beijing_now()
+        today_str = now.strftime("%Y-%m-%d")
+        hb_path = os.path.join(os.path.dirname(HEALTH_PATH), "daily_hb.json")
+        try:
+            rec = read_json(hb_path, {})
+            last_date = rec.get("date") if isinstance(rec, dict) else None
+        except Exception:
+            last_date = None
+
+        if hasattr(self, '_last_daily_hb') and (now - self._last_daily_hb).total_seconds() < 3600:
+            return
         today8 = now.replace(hour=HEARTBEAT_HOUR, minute=0, second=0, microsecond=0)
         if now < today8:
             today8 -= timedelta(days=1)
-        if hasattr(self, '_last_daily_hb') and (now - self._last_daily_hb).total_seconds() < 3600:
-            return
         # C3: 正常时间窗内发送；若 08:00 时进程未运行（错过窗口），
         #     今天已过该时点且当天还没发过 → 启动后补发一次，避免整天漏掉摘要
         in_window = abs((now - today8).total_seconds()) < POLL_INTERVAL + 5
-        already_today = (hasattr(self, '_last_daily_hb')
-                         and self._last_daily_hb.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d"))
+        already_today = (last_date == today_str)
         missed_today = (now.hour >= HEARTBEAT_HOUR) and not already_today
-        if in_window or missed_today:
+        if (in_window and not already_today) or missed_today:
             elapsed = format_duration((now - self.start_time).total_seconds())
             status = "在线" if self.last_status == "online" else "离线"
             msg = (
@@ -768,6 +828,10 @@ class Monitor:
             tg_send(msg, log_fn=self.log,
                     bark_title="微博监控运行摘要", bark_level="passive", bark_sound="")
             self._last_daily_hb = now
+            try:
+                write_json(hb_path, {"date": today_str, "sent_at": beijing_str(now)})
+            except Exception:
+                pass
 
     # ---- 主循环 ----
     def run(self):
@@ -782,37 +846,70 @@ class Monitor:
         tg_commands.init(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
         from notifier import send as tg_send
-        tg_send(f"岁己SUI 微博监控已启动\n命令: /status /today /stats /log /help", log_fn=self.log,
-                bark_title="监控已启动", bark_level="passive", bark_sound="")
+        # 启动通知节流：短时间内的重复启动（如看门狗误判重启）不再重复刷屏
+        start_notify_path = os.path.join(os.path.dirname(HEALTH_PATH), "last_start_notify.json")
+        _should_notify_start = True
+        try:
+            rec = read_json(start_notify_path, {})
+            ts = rec.get("ts") if isinstance(rec, dict) else None
+            if ts:
+                last = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                if (beijing_now() - last).total_seconds() < START_NOTIFY_MIN_GAP:
+                    _should_notify_start = False
+        except Exception:
+            pass
+        if _should_notify_start:
+            tg_send(f"岁己SUI 微博监控已启动\n命令: /status /today /stats /log /help", log_fn=self.log,
+                    bark_title="监控已启动", bark_level="passive", bark_sound="")
+            try:
+                write_json(start_notify_path, {"ts": beijing_str(beijing_now())})
+            except Exception:
+                pass
 
         try:
             while True:
-                # A3/A5: .env 变更（换 Cookie）→ 热重载并立即恢复正常轮询
-                if self._env_changed():
-                    self._reload_env()
-                # A5: 暂停态（Cookie 过期）只等待，不巡检
-                if self.paused:
-                    time.sleep(min(60, max(POLL_INTERVAL, 15)))
-                    continue
-                # A3: 退避期内跳过巡检（不重试、不刷接口）
-                now = beijing_now()
-                if self.backoff_until and now < self.backoff_until:
-                    wait = (self.backoff_until - now).total_seconds()
-                    time.sleep(max(1, min(wait, POLL_INTERVAL)))
-                    continue
-                self.check_and_log()
-                # B2: 定时刷新 stats（让 ongoing 会话时长持续增长，WebUI 数据不再陈旧）
-                if self._stats_due():
+                # 顶层兜底：单次巡检的意外异常不应终止进程。
+                # 原实现只捕获 KeyboardInterrupt，任何一个漏网的异常
+                #（requests 边界异常、文件句柄竞争等）都会直接带走整个进程，
+                # 表现为「监控莫名消失、只能靠看门狗反复拉起」。
+                try:
+                    # A3/A5: .env 变更（换 Cookie）→ 热重载并立即恢复正常轮询
+                    if self._env_changed():
+                        self._reload_env()
+                    # A5: 暂停态（Cookie 过期）只等待，不巡检
+                    if self.paused:
+                        time.sleep(min(60, max(POLL_INTERVAL, 15)))
+                        continue
+                    # A3: 退避期内跳过巡检（不重试、不刷接口）
+                    now = beijing_now()
+                    if self.backoff_until and now < self.backoff_until:
+                        wait = (self.backoff_until - now).total_seconds()
+                        time.sleep(max(1, min(wait, POLL_INTERVAL)))
+                        continue
+                    self.check_and_log()
+                    # B2: 定时刷新 stats（让 ongoing 会话时长持续增长，WebUI 数据不再陈旧）
+                    if self._stats_due():
+                        try:
+                            self.save_stats()
+                        except Exception as fe:
+                            self.log(f"[WARN] 定时刷新 stats 失败: {fe}")
+                        self.write_health()   # D1/D4: 与健康同频更新进程快照
+                    elif self._health_due():
+                        self.write_health()   # 轻量心跳：保证 watchdog 看到的心跳 age 始终很小
+                    self.heartbeat()
+                    self.daily_heartbeat()
+                    self.check_cookie_expiry()   # A2: Cookie 到期预警（内部每天一次）
+                    tg_commands.check_updates(self)
+                    time.sleep(POLL_INTERVAL)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    self.log(f"[ERROR] 巡检异常（已兜底，不退出）: {type(e).__name__}: {e}")
                     try:
-                        self.save_stats()
-                    except Exception as fe:
-                        self.log(f"[WARN] 定时刷新 stats 失败: {fe}")
-                    self.write_health()   # D1/D4: 与健康同频更新进程快照
-                self.heartbeat()
-                self.daily_heartbeat()
-                self.check_cookie_expiry()   # A2: Cookie 到期预警（内部每天一次）
-                tg_commands.check_updates(self)
-                time.sleep(POLL_INTERVAL)
+                        self.write_health()
+                    except Exception:
+                        pass
+                    time.sleep(POLL_INTERVAL)
         except KeyboardInterrupt:
             self.log("[退出] 收到中断信号，正在关闭...")
         finally:

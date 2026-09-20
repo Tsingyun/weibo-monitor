@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  岁己SUI 微博监控看门狗 —— 加固版计划任务定义（存档）
+
+  相对当前生效的 `schtasks /SC MINUTE` 版本，多出这些能力：
+    * StartWhenAvailable       错过的计划（睡眠/关机期间）在唤醒后尽快补跑
+    * BootTrigger/LogonTrigger 开机与登录即自检，不依赖启动文件夹
+    * EventTrigger             监听从睡眠恢复事件（Power-Troubleshooter EventID=1），
+                               唤醒后 20 秒即自愈，不必等下一个 5 分钟周期
+    * ExecutionTimeLimit PT10M 取代默认 72 小时上限（避免长跑实例被强杀）
+    * MultipleInstancesPolicy IgnoreNew  防并发
+
+  导入方法（需要可写任务计划程序的权限）：
+    python -c "open('t.xml','w',encoding='utf-16').write(open('_sui_watchdog_task_utf8.xml',encoding='utf-8').read())"
+    schtasks /Create /TN "SuiWeiboWatchdog" /XML "t.xml" /F
+
+  注意：实测受限环境下 `schtasks /Create /XML` 与 `Set-ScheduledTask` 均返回
+  「拒绝访问」，只有 `/SC MINUTE` 命令行方式能成功；故本文件暂作配置存档，
+  待有权限时可直接导入。schtasks 要求 XML 为 UTF-16，本文件用 UTF-8 便于版本管理。
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>HUAWEI\Tsing</Author>
+    <Description>岁己SUI 微博监控看门狗：开机/登录/每5分钟/从睡眠恢复时自检，发现 monitor 死亡或心跳停滞则自动拉起。2026-09-20 加固版（pythonw + 错过补跑 + 唤醒触发器）。</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-09-20T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <Repetition>
+        <Interval>PT5M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT1M</Delay>
+    </BootTrigger>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT30S</Delay>
+    </LogonTrigger>
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="System"&gt;&lt;Select Path="System"&gt;*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+      <Delay>PT20S</Delay>
+    </EventTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>HUAWEI\Tsing</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Users\Tsing\AppData\Local\Programs\Python\Python310\pythonw.exe</Command>
+      <Arguments>-X utf8 "C:\Users\Tsing\WorkBuddy\2026-06-28-01-11-29\weibo-monitor\watchdog.py"</Arguments>
+      <WorkingDirectory>C:\Users\Tsing\WorkBuddy\2026-06-28-01-11-29\weibo-monitor</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
