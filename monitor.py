@@ -9,7 +9,7 @@ from config import (
     POLL_INTERVAL, REQUEST_TIMEOUT, RETRY_COUNT,
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
-    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, STATS_REFRESH_SECONDS,
+    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, COOKIE_432_WARN_COUNT, STATS_REFRESH_SECONDS,
     MIN_SESSION_SECONDS, ARCHIVE_DAILY_PATH, HEALTH_PATH,
 )
 from utils import (beijing_now, beijing_str, logical_date, is_online,
@@ -48,6 +48,10 @@ class Monitor:
         self.rate_limited_alerted = False # 本轮退避是否已推送过告警
         self.paused = False               # Cookie 过期暂停态（进程存活等待热重载）
         self._env_mtime = None            # .env 修改时间（热重载检测）
+        # ---- 真实 Cookie 有效性追踪（区别于 ALF 理论天数）----
+        self.consecutive_432 = 0          # 连续 432 次数（达到阈值判定 Cookie 可能失效）
+        self.cookie_432_alerted = False   # 是否已推送过"Cookie 可能失效"告警
+        self.cookie_real_status = "unknown"  # 真实状态: valid/invalid/rate_limited/error/unknown
         # ---- B1 事件补写队列 / B2 统计定时刷新 / B3 今日计数 ----
         self._pending_events = []         # 写入失败待补写的事件
         self._last_stats_save = None      # 上次 stats 落盘时间
@@ -597,6 +601,8 @@ class Monitor:
                     snap["cookie_days_left"] = round(days_left, 1)
             except Exception:
                 pass
+            # 真实有效性（由最近一次真实请求结果决定，区别于上面的 ALF 理论天数）
+            snap["cookie_real_status"] = self.cookie_real_status
             write_json(HEALTH_PATH, snap)
         except Exception as e:
             self.log(f"[WARN] 健康快照写入失败: {e}")
@@ -611,7 +617,12 @@ class Monitor:
             if not desc1:
                 return
             self._last_poll_at = beijing_now()   # D1: 记录成功轮询时刻（健康快照）
-            # 请求成功 → 解除风控退避
+            # 请求成功 → 解除风控退避，并清真实有效性计数（说明 Cookie 真实可用）
+            self.consecutive_432 = 0
+            self.cookie_432_alerted = False
+            self.cookie_real_status = "valid"
+            self.consecutive_errors = 0
+            self.error_alert_sent = False
             if self.backoff_level or self.backoff_until:
                 self._reset_backoff(reason="接口已恢复")
 
@@ -752,6 +763,7 @@ class Monitor:
 
         except CookieExpiredError:
             # A5: 改为暂停态存活（不再 raise 终止进程），更新 .env 后自动热重载恢复
+            self.cookie_real_status = "invalid"
             if not self.paused:
                 self.paused = True
                 self.log("[FATAL] Cookie 已过期，进入暂停态（更新 .env 后自动恢复，无需重启）")
@@ -764,10 +776,23 @@ class Monitor:
         except RateLimitedError:
             # A3: 432 风控 → 进入退避（不重试、不刷接口）
             self._enter_backoff(beijing_now())
+            # 连续 432 达到阈值 → 明确判定 Cookie 可能失效并告警（回应"过期很久没提醒"）
+            self.consecutive_432 += 1
+            self.cookie_real_status = "rate_limited"
+            if self.consecutive_432 >= COOKIE_432_WARN_COUNT and not self.cookie_432_alerted:
+                self.cookie_432_alerted = True
+                tg_send(
+                    "🚨 微博持续返回 432（已连续 " + str(self.consecutive_432) + " 次）\n"
+                    "这通常意味着 Cookie 已被微博风控/吊销，而非临时限流。\n"
+                    "请更换 .env 中的 WEIBO_COOKIE（更新后自动热重载，无需重启）",
+                    log_fn=self.log,
+                    bark_title="🚨 Cookie 可能已失效", bark_level="critical", bark_sound="alarm",
+                    bark_call="1", bark_volume=10, bark_fallback=True)
             return
 
         except Exception as e:
             self.consecutive_errors += 1
+            self.cookie_real_status = "error"
             if self.consecutive_errors == 1:
                 self.error_start_time = beijing_now()
             self.log(f"[ERROR] 微博请求失败 (#{self.consecutive_errors}): {e}")

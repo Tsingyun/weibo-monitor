@@ -53,6 +53,15 @@ def fetch_desc1(log_fn=None):
             if _is_login_page(body):
                 raise CookieExpiredError("Cookie 已过期，API 返回登录页面")
             data = json.loads(body)
+            # 真实失效检测增强：返回 JSON 但 ok != 1 且明确登录失效，也判为过期
+            # （原逻辑只看登录页 HTML；若微博返回「JSON 但空数据/未登录」会被静默吞掉，永不报警）
+            ok = data.get("ok")
+            if ok not in (1, None):
+                msg = data.get("msg") or (data.get("data", {}).get("msg")
+                                          if isinstance(data.get("data"), dict) else None)
+                txt = f"{msg}".lower()
+                if any(k in txt for k in ("登录", "未登录", "login", "请先登录", "请登录", "授权", "signin")):
+                    raise CookieExpiredError("Cookie 已过期（API 返回未登录）")
             cards = data.get("data", {}).get("cards", [])
             for card in cards:
                 for g in card.get("card_group", []):
