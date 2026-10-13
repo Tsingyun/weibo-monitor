@@ -51,7 +51,10 @@ class Monitor:
         # ---- 真实 Cookie 有效性追踪（区别于 ALF 理论天数）----
         self.consecutive_432 = 0          # 连续 432 次数（达到阈值判定 Cookie 可能失效）
         self.cookie_432_alerted = False   # 是否已推送过"Cookie 可能失效"告警
-        self.cookie_real_status = "unknown"  # 真实状态: valid/invalid/rate_limited/error/unknown
+        # 真实状态: valid/invalid/rate_limited/error/unknown
+        self.cookie_real_status = "unknown"
+        self.cookie_login = None          # /api/config 的真实登录态: True/False/None(未知)
+        self.cookie_invalid_alerted = False  # 是否已推送过"会话失效"告警
         # ---- B1 事件补写队列 / B2 统计定时刷新 / B3 今日计数 ----
         self._pending_events = []         # 写入失败待补写的事件
         self._last_stats_save = None      # 上次 stats 落盘时间
@@ -603,13 +606,15 @@ class Monitor:
                 pass
             # 真实有效性（由最近一次真实请求结果决定，区别于上面的 ALF 理论天数）
             snap["cookie_real_status"] = self.cookie_real_status
+            # /api/config 的真实登录态（None=未知 / True=已登录 / False=未登录）
+            snap["cookie_login"] = self.cookie_login
             write_json(HEALTH_PATH, snap)
         except Exception as e:
             self.log(f"[WARN] 健康快照写入失败: {e}")
 
     # ---- 主巡检 ----
     def check_and_log(self):
-        from weibo import fetch_desc1, CookieExpiredError, RateLimitedError
+        from weibo import fetch_desc1, check_login, CookieExpiredError, RateLimitedError
         from notifier import notify as tg_notify, send as tg_send
 
         try:
@@ -621,6 +626,8 @@ class Monitor:
             self.consecutive_432 = 0
             self.cookie_432_alerted = False
             self.cookie_real_status = "valid"
+            self.cookie_login = True
+            self.cookie_invalid_alerted = False
             self.consecutive_errors = 0
             self.error_alert_sent = False
             if self.backoff_level or self.backoff_until:
@@ -764,6 +771,7 @@ class Monitor:
         except CookieExpiredError:
             # A5: 改为暂停态存活（不再 raise 终止进程），更新 .env 后自动热重载恢复
             self.cookie_real_status = "invalid"
+            self.cookie_login = False
             if not self.paused:
                 self.paused = True
                 self.log("[FATAL] Cookie 已过期，进入暂停态（更新 .env 后自动恢复，无需重启）")
@@ -774,19 +782,36 @@ class Monitor:
             return
 
         except RateLimitedError:
-            # A3: 432 风控 → 进入退避（不重试、不刷接口）
+            # A3: 432 → 进入退避（不重试、不刷接口）
             self._enter_backoff(beijing_now())
-            # 连续 432 达到阈值 → 明确判定 Cookie 可能失效并告警（回应"过期很久没提醒"）
             self.consecutive_432 += 1
+            # 关键：432 有两种截然不同的原因，必须用 /api/config 的真实登录态区分：
+            #   ① login=False → Cookie 会话已失效（换 IP/换节点都没用，必须换 Cookie）
+            #   ② login=True  → 真的是出口 IP/风控限流（等冷却或换出口）
+            # 早期版本一律按"限流"处理，导致会话失效被误判成 IP 问题，空耗数小时且不报警。
+            self.cookie_login = check_login(log_fn=self.log)
+            if self.cookie_login is False:
+                self.cookie_real_status = "invalid"
+                if not self.cookie_invalid_alerted:
+                    self.cookie_invalid_alerted = True
+                    tg_send(
+                        "🚨 微博 Cookie 会话已失效（/api/config 显示未登录）\n"
+                        "这不是 IP 限流，换节点/换网络都没用。\n"
+                        "请更新 .env 中的 WEIBO_COOKIE（更新后自动热重载，无需重启）",
+                        log_fn=self.log,
+                        bark_title="🚨 Cookie 已失效(未登录)", bark_level="critical",
+                        bark_sound="alarm", bark_call="1", bark_volume=10, bark_fallback=True)
+                return
+            # 登录态正常（或无法判断）却仍 432 → 判定为出口 IP/风控限流
             self.cookie_real_status = "rate_limited"
             if self.consecutive_432 >= COOKIE_432_WARN_COUNT and not self.cookie_432_alerted:
                 self.cookie_432_alerted = True
                 tg_send(
                     "🚨 微博持续返回 432（已连续 " + str(self.consecutive_432) + " 次）\n"
-                    "这通常意味着 Cookie 已被微博风控/吊销，而非临时限流。\n"
-                    "请更换 .env 中的 WEIBO_COOKIE（更新后自动热重载，无需重启）",
+                    "登录态正常，这更可能是当前出口 IP 被微博限流。\n"
+                    "可尝试更换 Clash 节点，或等待冷却后自动恢复。",
                     log_fn=self.log,
-                    bark_title="🚨 Cookie 可能已失效", bark_level="critical", bark_sound="alarm",
+                    bark_title="🚨 出口IP可能被限流", bark_level="critical", bark_sound="alarm",
                     bark_call="1", bark_volume=10, bark_fallback=True)
             return
 

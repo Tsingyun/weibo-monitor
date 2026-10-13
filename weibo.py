@@ -102,3 +102,45 @@ def fetch_desc1(log_fn=None):
     if last_err:
         raise last_err
     return None
+
+
+# ---- 真实登录态探测（判定 Cookie 是否可用的权威依据）----
+CONFIG_URL = "https://m.weibo.cn/api/config"
+
+
+def _build_config_request():
+    req = urllib.request.Request(CONFIG_URL)
+    req.add_header("User-Agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1")
+    req.add_header("Cookie", config.WEIBO_COOKIE)
+    req.add_header("Referer", "https://m.weibo.cn/")
+    req.add_header("Accept", "application/json, text/plain, */*")
+    req.add_header("X-Requested-With", "XMLHttpRequest")
+    req.add_header("MWeibo-Pwa", "1")
+    return req
+
+
+def check_login(log_fn=None):
+    """用 /api/config 探测 Cookie 的**真实登录态**。
+
+    返回 True=已登录 / False=未登录(会话已失效) / None=无法判断(网络错误)。
+    这是判定 Cookie 是否可用的权威依据：ALF 理论到期时间不可信，
+    而 432 既可能来自 IP 限流、也可能来自会话失效，必须靠此接口区分。
+    """
+    ctx = ssl.create_default_context()
+    req = _build_config_request()
+    try:
+        if config.WEIBO_PROXY:
+            opener = _make_opener(config.WEIBO_PROXY, ctx)
+            with opener.open(req, timeout=REQUEST_TIMEOUT) as resp:
+                body = resp.read()
+        else:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
+                body = resp.read()
+        data = json.loads(body)
+        return bool((data.get("data") or {}).get("login"))
+    except Exception as e:
+        if log_fn:
+            log_fn(f"登录态探测失败（按未知处理）: {e}")
+        return None
