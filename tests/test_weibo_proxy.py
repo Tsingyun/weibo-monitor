@@ -1,5 +1,5 @@
 """微博请求代理开关的单元测试（mock build_opener，隔离环境代理变量）。"""
-import sys, os, unittest
+import sys, os, unittest, ssl
 from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + '/..')
 import weibo
@@ -11,10 +11,13 @@ def _proxy_map(h):
     return getattr(h, "proxies", None) or getattr(h, "_proxy_dict", {}) or {}
 
 
+_CTX = ssl.create_default_context()
+
+
 class TestMakeOpener(unittest.TestCase):
     def test_proxy_nonempty_passes_proxy_handler(self):
         with mock.patch("urllib.request.build_opener") as mb:
-            weibo._make_opener("http://127.0.0.1:7897")
+            weibo._make_opener("http://127.0.0.1:7897", _CTX)
             args = mb.call_args[0]
             phs = [a for a in args if isinstance(a, urllib.request.ProxyHandler)]
             self.assertTrue(
@@ -24,14 +27,14 @@ class TestMakeOpener(unittest.TestCase):
 
     def test_proxy_empty_passes_no_proxy_handler(self):
         with mock.patch("urllib.request.build_opener") as mb:
-            weibo._make_opener("")
+            weibo._make_opener("", _CTX)
             args = mb.call_args[0]
             phs = [a for a in args if isinstance(a, urllib.request.ProxyHandler)]
             self.assertEqual(len(phs), 0, "直连（空代理）时不应向 build_opener 传入 ProxyHandler")
 
     def test_proxy_socks_passes_proxy_handler(self):
         with mock.patch("urllib.request.build_opener") as mb:
-            weibo._make_opener("socks5://127.0.0.1:1080")
+            weibo._make_opener("socks5://127.0.0.1:1080", _CTX)
             args = mb.call_args[0]
             phs = [a for a in args if isinstance(a, urllib.request.ProxyHandler)]
             self.assertTrue(

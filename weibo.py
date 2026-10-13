@@ -35,12 +35,15 @@ def _build_request():
     req.add_header("Accept", "application/json, text/plain, */*")
     return req
 
-def _make_opener(proxy):
-    """构造 urllib opener：proxy 非空时走代理，否则直连（兼容原行为）。"""
+def _make_opener(proxy, ctx):
+    """构造 urllib opener：proxy 非空时走代理，否则直连（兼容原行为）。
+    SSL 上下文必须在创建 opener 时通过 HTTPSHandler(context=ctx) 传入，
+    因为 OpenerDirector.open() 不接受 context 关键字参数（只有 urlopen 接受）。"""
+    handlers = []
     if proxy:
-        return urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    return urllib.request.build_opener()
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    handlers.append(urllib.request.HTTPSHandler(context=ctx))
+    return urllib.request.build_opener(*handlers)
 
 def _is_login_page(body_bytes):
     """检测响应是否为微博登录页（Cookie 过期）"""
@@ -57,8 +60,8 @@ def fetch_desc1(log_fn=None):
             # 支持代理：WEIBO_PROXY 非空时微博请求走指定出口（绕过被限流的 IP）；
             # 为空则保持原 urlopen 直连路径（兼容既有 mock 与默认行为）
             if config.WEIBO_PROXY:
-                opener = _make_opener(config.WEIBO_PROXY)
-                with opener.open(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
+                opener = _make_opener(config.WEIBO_PROXY, ctx)
+                with opener.open(req, timeout=REQUEST_TIMEOUT) as resp:
                     body = resp.read()
             else:
                 with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:

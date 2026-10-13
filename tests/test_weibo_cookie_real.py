@@ -21,8 +21,16 @@ _ORIG_URLOPEN = weibo.urllib.request.urlopen
 
 
 class TestWeiboCookieReal(unittest.TestCase):
+    def setUp(self):
+        # 强制直连路径，使下方对 urlopen 的 mock 能够命中
+        # （若 WEIBO_PROXY 非空，fetch_desc1 会走 opener.open 分支，urlopen mock 失效）
+        self._orig_proxy = weibo.config.WEIBO_PROXY
+        weibo.config.WEIBO_PROXY = ""
+        weibo.urllib.request.urlopen = _ORIG_URLOPEN
+
     def tearDown(self):
         weibo.urllib.request.urlopen = _ORIG_URLOPEN
+        weibo.config.WEIBO_PROXY = self._orig_proxy
 
     def _patch_body(self, body):
         weibo.urllib.request.urlopen = lambda req, **kw: _Resp(body)
