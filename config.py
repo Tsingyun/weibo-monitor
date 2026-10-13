@@ -40,6 +40,12 @@ def _first_env(*names, default=""):
     return default
 BARK_PROXY = os.getenv("BARK_PROXY", _first_env("HTTPS_PROXY", "https_proxy"))
 TELEGRAM_PROXY = os.getenv("TELEGRAM_PROXY", _first_env("HTTPS_PROXY", "https_proxy"))
+# 微博请求代理（可选）：默认空 = 直连（走系统 / Clash 默认路由）。
+# 当 monitor 出口 IP 被微博 432 风控时，可设此值让微博请求走干净出口，例如：
+#   WEIBO_PROXY=http://127.0.0.1:7897   # 走本机 Clash 指定端口
+# 注意：仅设此值通常不够，还需在 Clash 把 m.weibo.cn 路由到「未被限流的节点」，
+# 否则流量仍从该端口的默认节点出去，IP 还是被限流的那一个。
+WEIBO_PROXY = os.getenv("WEIBO_PROXY", "")
 # Bark 推送超时（秒）：api.day.app 在某些网络下连不上，缩短超时避免阻塞主轮询
 BARK_TIMEOUT = int(os.getenv("BARK_TIMEOUT", "8"))
 

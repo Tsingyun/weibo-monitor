@@ -6,7 +6,7 @@ import json
 import urllib.request
 import urllib.error
 import config
-from config import WEIBO_CONTAINERID, REQUEST_TIMEOUT, RETRY_COUNT
+from config import WEIBO_CONTAINERID, REQUEST_TIMEOUT, RETRY_COUNT, WEIBO_PROXY
 
 API_URL = f"https://m.weibo.cn/api/container/getIndex?containerid={WEIBO_CONTAINERID}_-_live"
 
@@ -35,6 +35,13 @@ def _build_request():
     req.add_header("Accept", "application/json, text/plain, */*")
     return req
 
+def _make_opener(proxy):
+    """构造 urllib opener：proxy 非空时走代理，否则直连（兼容原行为）。"""
+    if proxy:
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener()
+
 def _is_login_page(body_bytes):
     """检测响应是否为微博登录页（Cookie 过期）"""
     text = body_bytes[:500].decode(errors='replace')
@@ -47,8 +54,15 @@ def fetch_desc1(log_fn=None):
         try:
             ctx = ssl.create_default_context()
             req = _build_request()
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
-                body = resp.read()
+            # 支持代理：WEIBO_PROXY 非空时微博请求走指定出口（绕过被限流的 IP）；
+            # 为空则保持原 urlopen 直连路径（兼容既有 mock 与默认行为）
+            if config.WEIBO_PROXY:
+                opener = _make_opener(config.WEIBO_PROXY)
+                with opener.open(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
+                    body = resp.read()
+            else:
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
+                    body = resp.read()
             # Cookie 过期检测：响应是 HTML 而非 JSON
             if _is_login_page(body):
                 raise CookieExpiredError("Cookie 已过期，API 返回登录页面")

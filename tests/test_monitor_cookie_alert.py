@@ -11,7 +11,14 @@ def _raiser(exc):
     return f
 
 
+# 保存原始 fetch_desc1，避免测试桩泄漏污染后续用例
+_ORIG_FETCH = weibo.fetch_desc1
+
+
 class TestMonitorCookieAlert(unittest.TestCase):
+    def tearDown(self):
+        weibo.fetch_desc1 = _ORIG_FETCH
+
     def _monitor(self):
         return monitor.Monitor(log_fn=lambda *a, **k: None)
 
