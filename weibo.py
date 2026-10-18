@@ -24,6 +24,17 @@ class RateLimitedError(Exception):
         super().__init__(message)
         self.code = code
 
+class AccessDeniedError(Exception):
+    """微博接口层拒绝访问（HTTP 403 / `{"ok":0,"errno":"403"}`）。
+
+    与 432（频率风控）的关键区别：403「请求被拒绝」通常意味着**该账号被限制
+    访问这个接口**，实测换 Cookie、换出口 IP、换请求头、改 Cookie 子集都无效；
+    重试只会加重风控。故立即上抛，由上层进入退避并告警。
+    """
+    def __init__(self, message="HTTP 403 接口拒绝", code=403):
+        super().__init__(message)
+        self.code = code
+
 def _build_request():
     req = urllib.request.Request(API_URL)
     req.add_header("User-Agent",
@@ -94,6 +105,12 @@ def fetch_desc1(log_fn=None):
                 if log_fn:
                     log_fn("微博风控 (HTTP 432)，停止重试并进入退避")
                 raise RateLimitedError(str(e))
+            # 403 = 接口层拒绝访问（账号被限制）：换 Cookie/换 IP/换头都无效，
+            # 且 15s 一次的连续重试只会让限制更久，故同样立即上抛进入退避。
+            if getattr(e, "code", None) == 403:
+                if log_fn:
+                    log_fn("微博接口拒绝 (HTTP 403)，停止重试并进入退避")
+                raise AccessDeniedError(str(e))
             last_err = e
             if log_fn:
                 log_fn(f"微博请求失败 (attempt {attempt+1}/{RETRY_COUNT}): {e}")

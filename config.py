@@ -94,6 +94,11 @@ COOKIE_EXPIRE_WARN_DAYS = int(os.getenv("COOKIE_EXPIRE_WARN_DAYS", "3"))
 # （持续 432 = 被微博风控/吊销，而非临时限流；原逻辑只当退避、永不报警）
 COOKIE_432_WARN_COUNT = int(os.getenv("COOKIE_432_WARN_COUNT", "5"))
 
+# 连续遭遇 403「请求被拒绝」达到此次数，判定账号被限制访问该接口并主动提醒。
+# 403 与 432 不同：它是接口层直接拒绝（换 Cookie / 换 IP / 换请求头通常都无效），
+# 必须停止重试并进入退避，否则 15s 一次的 3 连击只会让账号越封越久。
+ACCESS_DENIED_WARN_COUNT = int(os.getenv("ACCESS_DENIED_WARN_COUNT", "3"))
+
 # ===== 统计定时刷新（秒）=====
 # stats.json 原先只在「状态发生变化」时才重算，导致长时间持续在线时
 # 「今日在线时长」/ ongoing 会话时长不增长、WebUI 数据陈旧。

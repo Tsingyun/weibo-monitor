@@ -9,7 +9,7 @@ from config import (
     POLL_INTERVAL, REQUEST_TIMEOUT, RETRY_COUNT,
     DAY_BOUNDARY_HOUR, HEARTBEAT_ENABLED, HEARTBEAT_HOUR,
     COVERAGE_BUCKET_MINUTES, MISSING_EVENT_THRESHOLD,
-    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, COOKIE_432_WARN_COUNT, STATS_REFRESH_SECONDS,
+    BACKOFF_STEPS, COOKIE_EXPIRE_WARN_DAYS, COOKIE_432_WARN_COUNT, ACCESS_DENIED_WARN_COUNT, STATS_REFRESH_SECONDS,
     MIN_SESSION_SECONDS, ARCHIVE_DAILY_PATH, HEALTH_PATH,
 )
 from utils import (beijing_now, beijing_str, logical_date, is_online,
@@ -51,10 +51,13 @@ class Monitor:
         # ---- 真实 Cookie 有效性追踪（区别于 ALF 理论天数）----
         self.consecutive_432 = 0          # 连续 432 次数（达到阈值判定 Cookie 可能失效）
         self.cookie_432_alerted = False   # 是否已推送过"Cookie 可能失效"告警
-        # 真实状态: valid/invalid/rate_limited/error/unknown
+        # 真实状态: valid/invalid/rate_limited/access_denied/error/unknown
         self.cookie_real_status = "unknown"
         self.cookie_login = None          # /api/config 的真实登录态: True/False/None(未知)
         self.cookie_invalid_alerted = False  # 是否已推送过"会话失效"告警
+        # ---- 403（账号被限制访问接口）----
+        self.consecutive_403 = 0          # 连续 403 次数
+        self.access_denied_alerted = False  # 是否已推送过"账号被限制"告警
         # ---- B1 事件补写队列 / B2 统计定时刷新 / B3 今日计数 ----
         self._pending_events = []         # 写入失败待补写的事件
         self._last_stats_save = None      # 上次 stats 落盘时间
@@ -453,19 +456,19 @@ class Monitor:
         self.backoff_until = None
         self.rate_limited_alerted = False
 
-    def _enter_backoff(self, now):
-        """遭遇 432 风控：提升退避等级并设定恢复时间（首次推送一次告警）"""
+    def _enter_backoff(self, now, reason="432 风控"):
+        """遭遇风控/接口拒绝：提升退避等级并设定恢复时间（首次推送一次告警）"""
         self.backoff_level = min(self.backoff_level + 1, len(BACKOFF_STEPS))
         secs = BACKOFF_STEPS[self.backoff_level - 1]
         self.backoff_until = now + timedelta(seconds=secs)
-        self.log(f"[退避] 触发 432 风控，等级 {self.backoff_level}/{len(BACKOFF_STEPS)}，"
+        self.log(f"[退避] 触发 {reason}，等级 {self.backoff_level}/{len(BACKOFF_STEPS)}，"
                  f"{secs}s 后重试（{beijing_str(self.backoff_until)}）")
         if not self.rate_limited_alerted:
             self.rate_limited_alerted = True
             try:
                 from notifier import send as tg_send
                 tg_send(
-                    "⚠️ 微博风控 (HTTP 432)\n已自动降频轮询（避免高频请求加速 Cookie 失效）\n"
+                    f"⚠️ 微博请求受限（{reason}）\n已自动降频轮询（避免高频请求加重风控）\n"
                     f"下次重试: {beijing_str(self.backoff_until)}\n"
                     "若长时间未恢复，请更换 Cookie 更新到 .env（会自动热重载，无需重启）",
                     log_fn=self.log,
@@ -614,7 +617,8 @@ class Monitor:
 
     # ---- 主巡检 ----
     def check_and_log(self):
-        from weibo import fetch_desc1, check_login, CookieExpiredError, RateLimitedError
+        from weibo import (fetch_desc1, check_login, CookieExpiredError,
+                           RateLimitedError, AccessDeniedError)
         from notifier import notify as tg_notify, send as tg_send
 
         try:
@@ -625,6 +629,8 @@ class Monitor:
             # 请求成功 → 解除风控退避，并清真实有效性计数（说明 Cookie 真实可用）
             self.consecutive_432 = 0
             self.cookie_432_alerted = False
+            self.consecutive_403 = 0
+            self.access_denied_alerted = False
             self.cookie_real_status = "valid"
             self.cookie_login = True
             self.cookie_invalid_alerted = False
@@ -812,6 +818,33 @@ class Monitor:
                     "可尝试更换 Clash 节点，或等待冷却后自动恢复。",
                     log_fn=self.log,
                     bark_title="🚨 出口IP可能被限流", bark_level="critical", bark_sound="alarm",
+                    bark_call="1", bark_volume=10, bark_fallback=True)
+            return
+
+        except AccessDeniedError:
+            # 403「请求被拒绝」= 接口层拒绝，通常是**该微博账号被限制访问超话接口**。
+            # 实测结论（2026-10-18）：换 Cookie、换出口 IP、换请求头、各种 Cookie 子集
+            # 全部仍 403；而同一 Cookie 打 /api/config、/api/users/show 均正常 200。
+            # 因此绝不能当普通网络错误高频重试（15s×3 连击只会让限制更久）。
+            self._enter_backoff(beijing_now(), reason="403 接口拒绝（账号可能被限制）")
+            self.consecutive_403 += 1
+            self.cookie_real_status = "access_denied"
+            # 顺带确认真实登录态，告警里区分「账号被限制」与「Cookie 也失效了」
+            self.cookie_login = check_login(log_fn=self.log)
+            if self.consecutive_403 >= ACCESS_DENIED_WARN_COUNT and not self.access_denied_alerted:
+                self.access_denied_alerted = True
+                login_txt = {True: "正常", False: "异常(未登录)", None: "无法判断"}[self.cookie_login]
+                tg_send(
+                    "🚨 微博接口拒绝访问（HTTP 403 请求被拒绝，已连续 "
+                    + str(self.consecutive_403) + " 次）\n"
+                    "当前 Cookie 登录态：" + login_txt + "\n"
+                    "这不是 IP 限流、也不是 Cookie 字段缺失——换节点/换 Cookie 通常无效。\n"
+                    "多为该微博账号被限制访问超话接口，建议：\n"
+                    "① 在 m.weibo.cn 重新登录（按提示完成短信/安全验证）后再取新 Cookie；\n"
+                    "② 或换用另一个微博账号做监控；\n"
+                    "③ 程序已自动进入退避，暂停高频请求以免加重限制。",
+                    log_fn=self.log,
+                    bark_title="🚨 微博账号被限制访问", bark_level="critical", bark_sound="alarm",
                     bark_call="1", bark_volume=10, bark_fallback=True)
             return
 

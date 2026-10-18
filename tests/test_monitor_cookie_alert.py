@@ -74,6 +74,25 @@ class TestMonitorCookieAlert(unittest.TestCase):
         self.assertEqual(m.cookie_real_status, "invalid")
         self.assertFalse(m.cookie_login)
 
+    def test_403_is_account_restricted(self):
+        """403「请求被拒绝」→ 判为账号被限制访问接口，退避并告警（不是 Cookie 失效）。"""
+        import notifier
+        alerts = []
+        notifier.send = lambda msg, **k: alerts.append((msg, k))
+        weibo.fetch_desc1 = _raiser(weibo.AccessDeniedError())
+        weibo.check_login = lambda **k: True
+        m = self._monitor()
+        for _ in range(3):
+            m.check_and_log()
+        self.assertEqual(m.cookie_real_status, "access_denied")
+        self.assertGreaterEqual(m.consecutive_403, 3)
+        self.assertTrue(m.cookie_login)
+        self.assertTrue(any("账号被限制" in (a[1].get("bark_title") or "") for a in alerts))
+        # 只告警一次
+        m.check_and_log()
+        self.assertEqual(
+            len([a for a in alerts if "账号被限制" in (a[1].get("bark_title") or "")]), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
